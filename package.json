@@ -1,0 +1,29 @@
+{
+  "name": "skincause",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.14.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm --workspace @skincause/web run dev",
+    "build": "npm run build --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "vitest run tests/association-engine.test.ts",
+    "test:integration": "vitest run tests/integration",
+    "test:e2e": "playwright test",
+    "openapi:generate": "node scripts/generate-openapi.mjs",
+    "openapi:check": "node scripts/check-openapi.mjs",
+    "test:contracts": "vitest run tests/contracts",
+    "mobile:typecheck": "npm --workspace @skincause/mobile run typecheck"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.54.2",
+    "@types/node": "^24.1.0",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
+  }
+}

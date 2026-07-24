@@ -1,0 +1,31 @@
+{
+  "name": "@skincause/web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint app components"
+  },
+  "dependencies": {
+    "@skincause/api-client": "*",
+    "@skincause/association-engine": "*",
+    "@skincause/contracts": "*",
+    "@skincause/design-tokens": "*",
+    "@skincause/domain": "*",
+    "@skincause/server-core": "*",
+    "lucide-react": "^0.536.0",
+    "next": "^16.1.0",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "zod": "^4.0.10"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.9",
+    "@types/react-dom": "^19.1.7",
+    "eslint": "^9.32.0",
+    "eslint-config-next": "^16.1.0"
+  }
+}
