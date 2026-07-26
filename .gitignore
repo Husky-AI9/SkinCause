@@ -9,5 +9,6 @@ tmp
 *.log
 .env
 .env.local
+.env.vercel
 *.tsbuildinfo
 .DS_Store
