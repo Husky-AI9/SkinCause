@@ -17,6 +17,7 @@
     "@skincause/design-tokens": "*",
     "@skincause/domain": "*",
     "@skincause/server-core": "*",
+    "@supabase/supabase-js": "^2.110.8",
     "lucide-react": "^0.536.0",
     "next": "^16.1.0",
     "react": "^19.1.1",

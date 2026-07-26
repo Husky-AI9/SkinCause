@@ -2,9 +2,18 @@ import { loadEnvConfig } from "@next/env";
 import type { NextConfig } from "next";
 import { resolve } from "node:path";
 
-loadEnvConfig(resolve(process.cwd(), "../.."));
+loadEnvConfig(
+  resolve(__dirname, "../.."),
+  process.env.NODE_ENV !== "production",
+  undefined,
+  true
+);
 
 const nextConfig: NextConfig = {
+  env: {
+    NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
+    NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  },
   transpilePackages: [
     "@skincause/api-client",
     "@skincause/association-engine",

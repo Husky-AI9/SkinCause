@@ -4,6 +4,23 @@ import type { Product, Scan } from "@skincause/contracts";
 export const persistentDisclaimer =
   "SkinCause provides cosmetic tracking and organizational insights, not medical diagnosis or treatment. Results may be affected by lighting, camera quality, routine adherence, time, and other changes.";
 
+export type CosmeticConcernLevel = "mild" | "moderate" | "elevated" | "unavailable";
+
+export function classifyCosmeticConcern(
+  normalizedSeverity: number | null
+): { level: CosmeticConcernLevel; label: string } {
+  if (normalizedSeverity === null) {
+    return { level: "unavailable", label: "Unavailable" };
+  }
+  if (normalizedSeverity <= 33) {
+    return { level: "mild", label: "Mild concern" };
+  }
+  if (normalizedSeverity <= 59) {
+    return { level: "moderate", label: "Moderate concern" };
+  }
+  return { level: "elevated", label: "Elevated concern" };
+}
+
 export const products: Product[] = [
   {
     id: "gentle-cleanser",

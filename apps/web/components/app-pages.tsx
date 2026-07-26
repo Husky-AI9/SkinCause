@@ -1,18 +1,30 @@
 "use client";
 
-import { seededExperiment, scans, persistentDisclaimer } from "@skincause/domain";
+import type {
+  Experiment,
+  Scan,
+  ScanActivityEvent,
+  ScanUploadSession
+} from "@skincause/contracts";
 import {
-  ArrowLeft,
+  classifyCosmeticConcern,
+  seededExperiment,
+  scans,
+  persistentDisclaimer
+} from "@skincause/domain";
+import {
   ArrowRight,
   CalendarDays,
   Camera,
   Check,
   CheckCircle2,
+  CircleDot,
   CloudSun,
   Download,
   Droplets,
   Eye,
   FileJson,
+  Flame,
   FlaskConical,
   Focus,
   ImageOff,
@@ -25,17 +37,114 @@ import {
   ScanFace,
   ShieldCheck,
   Sparkles,
-  Sun,
   Trash2,
   Upload,
+  Waves,
   XCircle
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useRef, useState } from "react";
+import { getSupabaseBrowserClient } from "../lib/supabase-browser";
 import { useAppState } from "./app-provider";
 
 const experimentId = "brightening-serum-elimination";
+
+type ScanStatusResponse = {
+  scanId: string;
+  status: Scan["status"];
+  pollAfterMs?: number;
+  result?: Scan;
+  activity?: ScanActivityEvent[];
+  error?: { code: string; message: string; retryable: boolean };
+};
+
+type ScanWorkflowStatus =
+  | "idle"
+  | "preparing"
+  | "ready"
+  | "uploading"
+  | "processing"
+  | "done"
+  | "failed";
+
+async function readApiResponse<T>(response: Response): Promise<T> {
+  const payload = (await response.json()) as {
+    data?: T;
+    error?: { message?: string };
+  };
+  if (!response.ok || !payload.data) {
+    throw new Error(payload.error?.message ?? "The request could not be completed.");
+  }
+  return payload.data;
+}
+
+async function waitForScan(
+  scanId: string,
+  apiFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
+  onActivity: (activity: ScanActivityEvent[]) => void
+): Promise<Scan> {
+  const deadline = Date.now() + 90_000;
+  while (Date.now() < deadline) {
+    const scan = await readApiResponse<ScanStatusResponse>(
+      await apiFetch(`/api/v1/scans/${encodeURIComponent(scanId)}`, { cache: "no-store" })
+    );
+    onActivity(scan.activity ?? []);
+    if (scan.result && ["succeeded", "normalized"].includes(scan.status)) return scan.result;
+    if (["provider_failed", "validation_failed", "upload_failed", "timed_out"].includes(scan.status)) {
+      throw new Error(scan.error?.message ?? "The image could not be analyzed.");
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, scan.pollAfterMs ?? 500));
+  }
+  throw new Error("The analysis is taking longer than expected. You can safely resume it later.");
+}
+
+function localActivity(
+  source: ScanActivityEvent["source"],
+  message: string,
+  level: ScanActivityEvent["level"] = "info"
+): ScanActivityEvent {
+  return {
+    id: crypto.randomUUID(),
+    at: new Date().toISOString(),
+    source,
+    level,
+    message
+  };
+}
+
+function mergeActivity(current: ScanActivityEvent[], incoming: ScanActivityEvent[]) {
+  const existingIds = new Set(current.map((event) => event.id));
+  return [
+    ...current,
+    ...incoming.filter((event) => !existingIds.has(event.id))
+  ].slice(-80);
+}
+
+function orderedConcerns(scan: Scan) {
+  const order = new Map([
+    ["pores", 0],
+    ["texture", 1],
+    ["redness", 2]
+  ]);
+  return [...scan.concerns].sort(
+    (left, right) => (order.get(left.key) ?? 99) - (order.get(right.key) ?? 99)
+  );
+}
+
+function ConcernScoreIcon({ concernKey }: { concernKey: string }) {
+  if (concernKey === "pores" || concernKey === "pore") {
+    return <CircleDot size={18} aria-hidden="true" />;
+  }
+  if (concernKey === "texture") {
+    return <Waves size={18} aria-hidden="true" />;
+  }
+  return <Flame size={18} aria-hidden="true" />;
+}
+
+function initialConcernKey(scan: Scan) {
+  return scan.concerns.find((concern) => concern.maskUrl)?.key ?? null;
+}
 
 export function ConsentPage() {
   const router = useRouter();
@@ -126,24 +235,31 @@ function ConsentItem({
 
 export function OnboardingPage() {
   const router = useRouter();
-  const { products, addProduct } = useAppState();
+  const { authStatus, products, addProduct } = useAppState();
   const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState("");
 
-  function submit(event: FormEvent<HTMLFormElement>) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const data = new FormData(event.currentTarget);
-    addProduct({
-      name: String(data.get("name")),
-      brand: String(data.get("brand")),
-      category: String(data.get("category")),
-      startedAt: new Date(String(data.get("startedAt"))).toISOString(),
-      cadence: "daily",
-      timeOfDay: String(data.get("timeOfDay")) as "AM" | "PM" | "AM + PM",
-      active: true,
-      recentlyChanged: data.get("recentlyChanged") === "on"
-    });
-    event.currentTarget.reset();
-    setSaved(true);
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    setSaveError("");
+    try {
+      await addProduct({
+        name: String(data.get("name")),
+        brand: String(data.get("brand")),
+        category: String(data.get("category")),
+        startedAt: new Date(String(data.get("startedAt"))).toISOString(),
+        cadence: "daily",
+        timeOfDay: String(data.get("timeOfDay")) as "AM" | "PM" | "AM + PM",
+        active: true,
+        recentlyChanged: data.get("recentlyChanged") === "on"
+      });
+      form.reset();
+      setSaved(true);
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "The product could not be saved.");
+    }
   }
 
   return (
@@ -194,6 +310,7 @@ export function OnboardingPage() {
                 Continue to baseline <ArrowRight size={18} />
               </button>
             </div>
+            {saveError ? <p className="form-error field full" role="alert">{saveError}</p> : null}
           </form>
         </section>
         <aside>
@@ -213,7 +330,7 @@ export function OnboardingPage() {
           </section>
         </aside>
       </div>
-      {saved && <Toast text="Product added to this guest workspace." />}
+      {saved && <Toast text={authStatus === "authenticated" ? "Product saved to your workspace." : "Product added to this guest workspace."} />}
     </main>
   );
 }
@@ -223,12 +340,7 @@ export function DashboardPage() {
   const result = seededExperiment.result;
   return (
     <main className="page-shell" id="main">
-      <PageHeading
-        eyebrow="Seeded investigation"
-        title="Good morning, investigator."
-        description="Your serum elimination is complete. The visible trend and your observations moved in the same direction."
-        action={<Link className="button" href="/check-in"><Plus size={18} /> New check-in</Link>}
-      />
+      <h1 className="sr-only">Dashboard</h1>
       <div className="dashboard-grid">
         <div>
           <section className="panel">
@@ -314,13 +426,12 @@ export function ProductsPage() {
   const { products, toggleProduct } = useAppState();
   return (
     <main className="page-shell" id="main">
-      <PageHeading
-        eyebrow="Routine inventory"
-        title="Products and usage history"
-        description="Stopping and restarting a product appends to its timeline; it does not erase prior usage."
-        action={<Link className="button" href="/onboarding"><Plus size={18} /> Add product</Link>}
-      />
+      <h1 className="sr-only">Routine</h1>
       <section className="panel">
+        <div className="panel-header">
+          <div><h2>Routine products</h2><p>Current products and usage status.</p></div>
+          <Link className="button button-small" href="/onboarding"><Plus size={18} /> Add product</Link>
+        </div>
         <div className="product-list">
           {products.map((product) => (
             <div className="product-row" key={product.id}>
@@ -349,67 +460,240 @@ export function ProductsPage() {
 
 export function ScanPage() {
   const router = useRouter();
+  const { apiFetch, demoMode, retainImages } = useAppState();
   const fileRef = useRef<HTMLInputElement>(null);
   const [fileName, setFileName] = useState("");
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState("");
+  const [result, setResult] = useState<Scan | null>(null);
+  const [activeConcern, setActiveConcern] = useState<string | null>(null);
+  const [usingDemoImage, setUsingDemoImage] = useState(false);
   const [error, setError] = useState("");
-  const [status, setStatus] = useState<"idle" | "ready" | "uploading" | "processing" | "done">("idle");
+  const [status, setStatus] = useState<ScanWorkflowStatus>("idle");
+  const [activity, setActivity] = useState<ScanActivityEvent[]>([]);
 
   useEffect(() => {
     const activeId = window.localStorage.getItem("skincause-active-scan");
-    if (activeId && status === "idle") {
-      const timer = window.setTimeout(() => setStatus("ready"), 0);
-      return () => window.clearTimeout(timer);
+    if (!activeId) return;
+    let cancelled = false;
+    const resume = async () => {
+      setStatus("processing");
+      setActivity((current) => mergeActivity(current, [
+        localActivity("client", "resuming persisted scan status polling")
+      ]));
+      try {
+        const resumedResult = await waitForScan(activeId, apiFetch, (events) => {
+          setActivity((current) => mergeActivity(current, events));
+        });
+        if (cancelled) return;
+        setResult(resumedResult);
+        setActiveConcern(initialConcernKey(resumedResult));
+        setStatus("done");
+        window.localStorage.setItem("skincause-latest-scan", activeId);
+        window.localStorage.removeItem("skincause-active-scan");
+      } catch (resumeError) {
+        if (cancelled) return;
+        setError(resumeError instanceof Error ? resumeError.message : "The scan could not be resumed.");
+        setActivity((current) => mergeActivity(current, [
+          localActivity("client", "scan polling interrupted", "error")
+        ]));
+        setStatus("failed");
+        window.localStorage.removeItem("skincause-active-scan");
+      }
+    };
+    void resume();
+    return () => {
+      cancelled = true;
+    };
+  }, [apiFetch]);
+
+  async function loadDemoImage() {
+    setError("");
+    setStatus("preparing");
+    try {
+      const blob = await fetch("/images/demo-face-v3.png")
+      .then((response) => {
+        if (!response.ok) throw new Error("The demo image could not be loaded.");
+        return response.blob();
+      });
+      const file = new File([blob], "skincause-asian-skin-test.png", { type: "image/png" });
+      setSelectedFile(file);
+      setPreviewUrl(URL.createObjectURL(file));
+      setFileName(file.name);
+      setUsingDemoImage(true);
+      setResult(null);
+      setActiveConcern(null);
+      setStatus("ready");
+      setActivity([
+        localActivity(
+          "client",
+          `validated image/png; ${blob.size} bytes`,
+          "success"
+        )
+      ]);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "The demo image could not be loaded.");
+      setStatus("failed");
     }
-  }, [status]);
+  }
+
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
 
   function chooseFile(file?: File) {
     setError("");
     if (!file) return;
     if (!["image/jpeg", "image/png"].includes(file.type)) {
       setError("Upload a JPG or PNG image.");
+      setActivity((current) => mergeActivity(current, [
+        localActivity("client", "image validation rejected: unsupported format", "error")
+      ]));
       return;
     }
     if (file.size >= 10_000_000) {
       setError("Choose an image smaller than 10 MB.");
+      setActivity((current) => mergeActivity(current, [
+        localActivity("client", "image validation rejected: file exceeds 10 MB", "error")
+      ]));
       return;
     }
+    setSelectedFile(file);
+    setPreviewUrl(URL.createObjectURL(file));
     setFileName(file.name);
+    setUsingDemoImage(false);
+    setResult(null);
+    setActiveConcern(null);
     setStatus("ready");
+    setActivity([
+      localActivity(
+        "client",
+        `validated ${file.type}; ${file.size} bytes`,
+        "success"
+      )
+    ]);
   }
 
-  function submitScan() {
-    const scanId = window.localStorage.getItem("skincause-active-scan") ?? crypto.randomUUID();
-    window.localStorage.setItem("skincause-active-scan", scanId);
-    setStatus("uploading");
-    window.setTimeout(() => setStatus("processing"), 700);
-    window.setTimeout(() => {
+  async function submitScan() {
+    if (!selectedFile) return;
+    setError("");
+    try {
+      const clientRequestId = crypto.randomUUID();
+      setStatus("uploading");
+      setActivity((current) => mergeActivity(current, [
+        localActivity("client", "POST /api/v1/scans/upload-sessions")
+      ]));
+      const uploadSession = await readApiResponse<ScanUploadSession>(
+        await apiFetch("/api/v1/scans/upload-sessions", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            clientRequestId,
+            mimeType: selectedFile.type,
+            byteSize: selectedFile.size,
+            fileName: selectedFile.name,
+            retainImage: retainImages
+          })
+        })
+      );
+      setActivity((current) => mergeActivity(current, [
+        ...(uploadSession.activity ?? []),
+        localActivity("skincause", "HTTP 201; private upload session created", "success")
+      ]));
+      window.localStorage.setItem("skincause-active-scan", uploadSession.scanId);
+
+      if (uploadSession.upload.type === "supabase-signed") {
+        const client = getSupabaseBrowserClient();
+        if (!client) throw new Error("Secure image storage is not configured.");
+        const { error: uploadError } = await client.storage
+          .from(uploadSession.upload.bucket)
+          .uploadToSignedUrl(
+            uploadSession.upload.path,
+            uploadSession.upload.token,
+            selectedFile,
+            { contentType: selectedFile.type }
+          );
+        if (uploadError) throw new Error("The image could not be uploaded securely.");
+        setActivity((current) => mergeActivity(current, [
+          localActivity(
+            "storage",
+            `signed upload completed; ${selectedFile.size} bytes stored privately`,
+            "success"
+          )
+        ]));
+      } else {
+        await readApiResponse(
+          await apiFetch(uploadSession.upload.url, {
+            method: uploadSession.upload.method,
+            headers: uploadSession.upload.requiredHeaders,
+            body: selectedFile
+          })
+        );
+        setActivity((current) => mergeActivity(current, [
+          localActivity(
+            "storage",
+            `PUT same-origin upload -> 200; ${selectedFile.size} bytes stored`,
+            "success"
+          )
+        ]));
+      }
+      const submitted = await readApiResponse<ScanStatusResponse>(
+        await apiFetch(`/api/v1/scans/${encodeURIComponent(uploadSession.scanId)}/submit`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ clientRequestId })
+        })
+      );
+      setActivity((current) => mergeActivity(current, submitted.activity ?? []));
+      setStatus("processing");
+      const completed = await waitForScan(uploadSession.scanId, apiFetch, (events) => {
+        setActivity((current) => mergeActivity(current, events));
+      });
+      setResult(completed);
+      setActiveConcern(initialConcernKey(completed));
       setStatus("done");
+      window.localStorage.setItem("skincause-latest-scan", uploadSession.scanId);
       window.localStorage.removeItem("skincause-active-scan");
-    }, 2200);
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : "The scan could not be completed.");
+      setActivity((current) => mergeActivity(current, [
+        localActivity("client", "scan workflow interrupted; safe error returned", "error")
+      ]));
+      setStatus("failed");
+    }
   }
 
   return (
     <main className="page-shell" id="main">
-      <PageHeading
-        eyebrow="Guided baseline scan"
-        title="Make each scan comparable"
-        description="Use the same position, expression, and lighting each time. The provider remains the final quality validator."
-      />
+      <h1 className="sr-only">Scan</h1>
       <div className="scan-grid">
-        <section className="capture-zone">
-          <div>
-            <div className="face-guide" aria-hidden="true"><Focus size={50} /></div>
-            <p style={{ marginTop: 18, marginBottom: 4 }}><strong>Center your face inside the guide</strong></p>
-            <p className="muted">Front-facing · neutral expression · eyes open</p>
-          </div>
+        <section className={previewUrl ? "capture-zone has-image" : "capture-zone"}>
+          {previewUrl && status === "done" && result ? (
+            <ConcernVisualization
+              scan={result}
+              imageUrl={previewUrl}
+              activeConcern={activeConcern}
+              onSelectConcern={setActiveConcern}
+            />
+          ) : previewUrl ? (
+            <div
+              className="demo-face-preview"
+              role="img"
+              aria-label={demoMode ? "Prepared synthetic skin-analysis test face" : `Preview of ${fileName}`}
+              style={{ backgroundImage: `url(${previewUrl})` }}
+            />
+          ) : (
+            <div>
+              <div className="face-guide" aria-hidden="true"><Focus size={50} /></div>
+              <p style={{ marginTop: 18, marginBottom: 4 }}><strong>Center your face inside the guide</strong></p>
+              <p className="muted">Front-facing · neutral expression · eyes open</p>
+            </div>
+          )}
         </section>
         <aside className="scan-instructions">
-          <section className="panel">
-            <div className="panel-header"><div><h2>Capture checklist</h2><p>Repeat this setup at every check-in.</p></div><Camera size={24} /></div>
-            <Instruction icon={Sun} title="Even front lighting">Avoid strong backlight and direct shadows.</Instruction>
-            <Instruction icon={Eye} title="Unobstructed face">Remove glasses and move hair away from the face.</Instruction>
-            <Instruction icon={Focus} title="Consistent framing">Keep the full face visible and close enough for analysis.</Instruction>
-          </section>
+          <AnalysisActivity status={status} result={result} activity={activity} />
           <section className="panel">
             <input
               className="upload-input"
@@ -419,6 +703,12 @@ export function ScanPage() {
               onChange={(event) => chooseFile(event.target.files?.[0])}
               aria-label="Choose a JPG or PNG image"
             />
+            {usingDemoImage && status === "ready" ? (
+              <div className="callout" role="status">
+                <strong>Synthetic test image ready</strong>
+                <p className="muted">This AI-generated portrait is prepared for a live skin-analysis scan.</p>
+              </div>
+            ) : null}
             {error && <div className="callout danger" role="alert" style={{ marginTop: 14 }}>{error}</div>}
             {(fileName || status === "ready") && !error && (
               <div className="quality-box" style={{ marginTop: 14 }}>
@@ -427,14 +717,32 @@ export function ScanPage() {
               </div>
             )}
             {status === "idle" && (
-              <button className="button" style={{ width: "100%", marginTop: 16 }} onClick={() => fileRef.current?.click()}>
-                <Upload size={18} /> Choose image
-              </button>
+              <div className="scan-source-actions">
+                <button className="button" onClick={() => fileRef.current?.click()}>
+                  <Upload size={18} /> Upload your image
+                </button>
+                {demoMode ? (
+                  <button className="button button-secondary" onClick={() => void loadDemoImage()}>
+                    <ScanFace size={18} /> Use demo image
+                  </button>
+                ) : null}
+              </div>
+            )}
+            {status === "preparing" && (
+              <div aria-live="polite" style={{ marginTop: 18 }}>
+                <p className="eyebrow">Preparing demo image</p>
+                <div className="bar"><span style={{ width: "58%" }} /></div>
+              </div>
             )}
             {status === "ready" && (
-              <button className="button" style={{ width: "100%", marginTop: 16 }} onClick={submitScan}>
-                <ScanFace size={18} /> Analyze in mock mode
-              </button>
+              <div className="scan-ready-actions">
+                <button className="button" onClick={() => void submitScan()}>
+                  <ScanFace size={18} /> {usingDemoImage ? "Analyze demo image" : "Analyze image"}
+                </button>
+                <button className="button button-secondary" onClick={() => fileRef.current?.click()}>
+                  <Upload size={18} /> Choose another image
+                </button>
+              </div>
             )}
             {(status === "uploading" || status === "processing") && (
               <div aria-live="polite" style={{ marginTop: 18 }}>
@@ -445,11 +753,55 @@ export function ScanPage() {
             )}
             {status === "done" && (
               <div aria-live="polite" style={{ marginTop: 18 }}>
-                <div className="quality-box"><strong>Scan complete</strong><p className="muted">Redness 43 · Texture 44 · Pores 39</p></div>
+                <div className="quality-box">
+                  <span className={`result-provenance result-provenance-${result?.provider ?? "unknown"}`}>
+                    {result?.provider === "youcam"
+                      ? `Live YouCam ${result.providerVersion ?? "provider"} response`
+                      : "Agent test result"}
+                  </span>
+                  <strong>Scan complete</strong>
+                  <div className="scan-score-list" data-testid="provider-score-summary">
+                    {result ? orderedConcerns(result).map((concern) => {
+                      const assessment = classifyCosmeticConcern(concern.normalizedSeverity);
+                      return (
+                        <div
+                          className={`scan-score-row scan-score-${concern.key}`}
+                          key={concern.key}
+                        >
+                          <ConcernScoreIcon concernKey={concern.key} />
+                          <span className="scan-score-label">{concern.providerLabel}</span>
+                          <strong>
+                            {concern.normalizedSeverity === null
+                              ? "n/a"
+                              : Math.round(concern.normalizedSeverity)}
+                          </strong>
+                          <div className={`scan-score-assessment assessment-${assessment.level}`}>
+                            {assessment.label}
+                          </div>
+                        </div>
+                      );
+                    }) : null}
+                  </div>
+                </div>
                 <button className="button" style={{ width: "100%", marginTop: 16 }} onClick={() => router.push("/experiments/new")}>
                   Plan experiment <ArrowRight size={18} />
                 </button>
               </div>
+            )}
+            {status === "failed" && (
+              <button className="button button-secondary" style={{ width: "100%", marginTop: 16 }} onClick={() => {
+                setStatus("idle");
+                setError("");
+                setSelectedFile(null);
+                setPreviewUrl("");
+                setFileName("");
+                setUsingDemoImage(false);
+                setResult(null);
+                setActiveConcern(null);
+                setActivity([]);
+              }}>
+                Try another image
+              </button>
             )}
           </section>
         </aside>
@@ -458,18 +810,219 @@ export function ScanPage() {
   );
 }
 
-function Instruction({ icon: Icon, title, children }: { icon: typeof Sun; title: string; children: React.ReactNode }) {
-  return <div className="instruction"><Icon size={23} /><div><strong>{title}</strong><p className="muted">{children}</p></div></div>;
+function AnalysisActivity({
+  status,
+  result,
+  activity
+}: {
+  status: ScanWorkflowStatus;
+  result: Scan | null;
+  activity: ScanActivityEvent[];
+}) {
+  const logRef = useRef<HTMLDivElement>(null);
+  const isRunning = status === "uploading" || status === "processing";
+
+  useEffect(() => {
+    const log = logRef.current;
+    if (log) log.scrollTop = log.scrollHeight;
+  }, [activity]);
+
+  const badge = status === "done"
+    ? result?.provider === "youcam" ? "Live YouCam response" : "Agent test mode"
+    : status === "processing"
+      ? "Provider active"
+      : status === "uploading"
+        ? "Uploading"
+        : status === "failed"
+          ? "Failed"
+          : status === "ready"
+            ? "Ready"
+            : "Idle";
+
+  return (
+    <section className="panel analysis-activity-panel">
+      <div className="panel-header">
+        <div>
+          <h2>Live execution log</h2>
+          <p>Sanitized events emitted by this scan.</p>
+        </div>
+        <span className={`status-pill activity-badge activity-badge-${status}`}>{badge}</span>
+      </div>
+      <div
+        className="analysis-terminal"
+        ref={logRef}
+        role="log"
+        aria-live="polite"
+        aria-label="Scan execution activity"
+      >
+        {activity.length === 0 ? (
+          <div className="terminal-line terminal-line-muted">
+            <time>--:--:--</time>
+            <p><span className="terminal-prompt">$</span> waiting for an image</p>
+          </div>
+        ) : activity.map((event) => {
+          const displaySource = event.source === "mock" ? "agent" : event.source;
+          return (
+            <div
+              className={`terminal-line terminal-line-${event.level}`}
+              key={event.id}
+            >
+              <time dateTime={event.at}>
+                {new Date(event.at).toLocaleTimeString("en-US", {
+                  hour12: false,
+                  hour: "2-digit",
+                  minute: "2-digit",
+                  second: "2-digit"
+                })}
+              </time>
+              <p>
+                <span className="terminal-prompt">$</span>{" "}
+                <span className={`terminal-source terminal-source-${displaySource}`}>
+                  [{displaySource}]
+                </span>{" "}
+                {event.message}
+              </p>
+            </div>
+          );
+        })}
+        {isRunning ? (
+          <div className="terminal-line terminal-line-cursor" aria-label="Command running">
+            <time>{new Date().toLocaleTimeString("en-US", { hour12: false })}</time>
+            <p><span className="terminal-prompt">$</span> <span className="terminal-cursor" /></p>
+          </div>
+        ) : null}
+      </div>
+      <p className="analysis-log-safety">
+        Provider credentials, task IDs, image URLs, and authorization headers stay hidden.
+      </p>
+    </section>
+  );
+}
+
+function ConcernVisualization({
+  scan,
+  imageUrl,
+  activeConcern,
+  onSelectConcern
+}: {
+  scan: Scan;
+  imageUrl: string;
+  activeConcern: string | null;
+  onSelectConcern: (key: string | null) => void;
+}) {
+  const active = scan.concerns.find((concern) => concern.key === activeConcern);
+  const overlayUrl = active?.maskUrl;
+  const availableConcerns = orderedConcerns(scan).filter((concern) => concern.maskUrl);
+
+  return (
+    <div className="concern-visualization">
+      <div className="segmentation-heading">
+        <strong>Facial segmentation</strong>
+        <span>{availableConcerns.length} provider mask overlays</span>
+      </div>
+      <div className="concern-image-stack">
+        <div
+          className="concern-base-image"
+          role="img"
+          aria-label={active
+            ? `${active.providerLabel} visual pattern overlay on the analyzed image`
+            : "Original analyzed image"}
+          style={{ backgroundImage: `url(${imageUrl})` }}
+        />
+        {overlayUrl ? (
+          <div
+            className="concern-provider-overlay"
+            aria-hidden="true"
+            style={{ backgroundImage: `url(${overlayUrl})` }}
+          />
+        ) : null}
+        <span className="concern-visual-label">
+          {active
+            ? `${active.providerLabel} observed pattern`
+            : "Original image"}
+        </span>
+      </div>
+      {availableConcerns.length > 0 ? (
+        <>
+          <div className="concern-controls" aria-label="Scan image view">
+            <button
+              className={activeConcern === null ? "is-active" : ""}
+              type="button"
+              aria-pressed={activeConcern === null}
+              onClick={() => onSelectConcern(null)}
+            >
+              Original
+            </button>
+            {availableConcerns.map((concern) => (
+              <button
+                className={activeConcern === concern.key ? "is-active" : ""}
+                type="button"
+                aria-pressed={activeConcern === concern.key}
+                key={concern.key}
+                onClick={() => onSelectConcern(concern.key)}
+              >
+                <span className={`concern-swatch concern-swatch-${concern.key}`} aria-hidden="true" />
+                {concern.providerLabel}
+              </button>
+            ))}
+          </div>
+          <p className="concern-visual-note">
+            Highlights show AI-observed cosmetic patterns from this scan, not a diagnosis.
+          </p>
+        </>
+      ) : (
+        <div className="concern-unavailable" role="status">
+          <ImageOff size={18} />
+          <span>Location data was not returned for this scan. Scores remain available.</span>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function ExperimentPlannerPage() {
   const router = useRouter();
-  const { products } = useAppState();
+  const { apiFetch, authStatus, products } = useAppState();
   const [type, setType] = useState<"elimination" | "reintroduction">("elimination");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (authStatus !== "authenticated") {
+      router.push(`/experiments/${experimentId}`);
+      return;
+    }
+    const data = new FormData(event.currentTarget);
+    setBusy(true);
+    setError("");
+    try {
+      const experiment = await readApiResponse<Experiment>(
+        await apiFetch("/api/v1/experiments", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            type,
+            suspectProductId: String(data.get("suspectProductId")),
+            startedAt: new Date(String(data.get("startedAt"))).toISOString(),
+            hypothesis: String(data.get("hypothesis"))
+          })
+        })
+      );
+      window.localStorage.setItem("skincause-active-experiment", experiment.id);
+      window.localStorage.removeItem("skincause-latest-scan");
+      router.push(`/experiments/${experiment.id}`);
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : "The experiment could not be started.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <main className="page-shell" id="main">
       <PageHeading eyebrow="Step 4 of 4" title="Plan one clear change" description="Select one suspect product. Every other routine step becomes a locked snapshot for the duration of the investigation." />
-      <form className="dashboard-grid" onSubmit={(event) => { event.preventDefault(); router.push(`/experiments/${experimentId}`); }}>
+      <form className="dashboard-grid" onSubmit={submit}>
         <section className="panel">
           <div className="form-grid">
             <div className="field full">
@@ -481,13 +1034,13 @@ export function ExperimentPlannerPage() {
             </div>
             <div className="field full">
               <label htmlFor="suspect">Suspect product</label>
-              <select id="suspect" defaultValue="brightening-serum">
+              <select id="suspect" name="suspectProductId" required>
                 {products.map((product) => <option value={product.id} key={product.id}>{product.name}{product.recentlyChanged ? " · recently changed" : ""}</option>)}
               </select>
             </div>
             <div className="field">
               <label htmlFor="start-date">Start date</label>
-              <input id="start-date" type="date" defaultValue="2026-07-24" />
+              <input id="start-date" name="startedAt" type="date" defaultValue="2026-07-24" required />
             </div>
             <div className="field">
               <label htmlFor="primary-concern">Primary concern</label>
@@ -495,7 +1048,7 @@ export function ExperimentPlannerPage() {
             </div>
             <div className="field full">
               <label htmlFor="hypothesis">What are you trying to observe?</label>
-              <textarea id="hypothesis" defaultValue="Observe whether redness and texture change while the serum is paused." />
+              <textarea id="hypothesis" name="hypothesis" defaultValue="Observe whether redness and texture change while the serum is paused." required />
             </div>
           </div>
         </section>
@@ -504,7 +1057,10 @@ export function ExperimentPlannerPage() {
             <p className="eyebrow"><LockKeyhole size={13} /> Single-variable policy</p>
             <h2>Everything else stays consistent</h2>
             <p>SkinCause will mark a check-in as confounded if another routine step changes during this experiment.</p>
-            <button className="button" type="submit">Start investigation <ArrowRight size={18} /></button>
+            {error ? <p className="form-error" role="alert">{error}</p> : null}
+            <button className="button" type="submit" disabled={busy || products.length === 0}>
+              {busy ? "Starting..." : "Start investigation"} <ArrowRight size={18} />
+            </button>
           </section>
         </aside>
       </form>
@@ -514,31 +1070,68 @@ export function ExperimentPlannerPage() {
 
 export function CheckInPage() {
   const router = useRouter();
-  const { saveCheckIn } = useAppState();
+  const { apiFetch, authStatus, saveCheckIn } = useAppState();
   const [adherence, setAdherence] = useState("all");
   const [observation, setObservation] = useState(5);
   const [confounders, setConfounders] = useState<string[]>([]);
   const [concerning, setConcerning] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [savedExperimentId, setSavedExperimentId] = useState(experimentId);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
 
   const toggleConfounder = (value: string) =>
     setConfounders((current) => current.includes(value) ? current.filter((item) => item !== value) : [...current, value]);
 
-  function submit(event: FormEvent) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (concerning) return;
-    saveCheckIn();
-    setSaved(true);
+    const form = event.currentTarget;
+    setBusy(true);
+    setError("");
+    try {
+      let activeExperimentId = window.localStorage.getItem("skincause-active-experiment");
+      if (authStatus === "authenticated" && !activeExperimentId) {
+        const experiments = await readApiResponse<Experiment[]>(
+          await apiFetch("/api/v1/experiments", { cache: "no-store" })
+        );
+        activeExperimentId = experiments.find((experiment) => experiment.status === "active")?.id ?? null;
+      }
+      if (authStatus === "authenticated" && !activeExperimentId) {
+        throw new Error("Start an experiment before saving a check-in.");
+      }
+      const targetExperimentId = activeExperimentId ?? experimentId;
+      if (authStatus === "authenticated") {
+        const notes = String(new FormData(form).get("notes") ?? "");
+        const latestScanId = window.localStorage.getItem("skincause-latest-scan") ?? undefined;
+        await readApiResponse(
+          await apiFetch(`/api/v1/experiments/${encodeURIComponent(targetExperimentId)}/check-ins`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              adherence: adherence === "all" ? 100 : adherence === "most" ? 75 : 40,
+              observation,
+              confounders,
+              notes,
+              scanId: latestScanId
+            })
+          })
+        );
+        window.localStorage.removeItem("skincause-latest-scan");
+      }
+      saveCheckIn();
+      setSavedExperimentId(targetExperimentId);
+      setSaved(true);
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : "The check-in could not be saved.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
     <main className="page-shell" id="main">
-      <PageHeading
-        eyebrow="Day 15 check-in"
-        title="Record what happened, not what you hoped."
-        description="A short structured check-in makes the final evidence more interpretable."
-        action={<Link className="button button-secondary" href="/dashboard"><ArrowLeft size={18} /> Dashboard</Link>}
-      />
+      <h1 className="sr-only">Check in</h1>
       <form className="dashboard-grid" onSubmit={submit}>
         <div>
           <section className="panel">
@@ -584,7 +1177,7 @@ export function CheckInPage() {
             </div>
             <div className="field" style={{ marginTop: 14 }}>
               <label htmlFor="notes">Optional note</label>
-              <textarea id="notes" placeholder="Keep this factual and brief." />
+              <textarea id="notes" name="notes" placeholder="Keep this factual and brief." />
             </div>
           </section>
         </div>
@@ -605,30 +1198,29 @@ export function CheckInPage() {
               </div>
             )}
           </section>
-          <button className="button" type="submit" disabled={concerning} style={{ width: "100%" }}>
-            Save check-in <Check size={18} />
+          {error ? <p className="form-error" role="alert">{error}</p> : null}
+          <button className="button" type="submit" disabled={concerning || busy} style={{ width: "100%" }}>
+            {busy ? "Saving..." : "Save check-in"} <Check size={18} />
           </button>
         </aside>
       </form>
       {saved && (
         <div className="toast" role="status">
-          Check-in saved. <button className="button button-small" style={{ marginLeft: 10 }} onClick={() => router.push(`/experiments/${experimentId}`)}>View timeline</button>
+          Check-in saved. <button className="button button-small" style={{ marginLeft: 10 }} onClick={() => router.push(`/experiments/${savedExperimentId}`)}>View timeline</button>
         </div>
       )}
     </main>
   );
 }
 
-export function ExperimentDetailPage() {
-  const { checkInSaved } = useAppState();
+export function ExperimentDetailPage({ id = experimentId }: { id?: string }) {
+  const { authStatus, checkInSaved } = useAppState();
+  if (authStatus === "authenticated") {
+    return <AuthenticatedExperimentDetail id={id} />;
+  }
   return (
     <main className="page-shell" id="main">
-      <PageHeading
-        eyebrow="Completed elimination · Jun 9–24"
-        title="Brightening serum elimination"
-        description="The serum was paused while the cleanser and moisturizer remained locked."
-        action={<Link className="button" href={`/results/${experimentId}`}>View result <ArrowRight size={18} /></Link>}
-      />
+      <h1 className="sr-only">Brightening serum elimination</h1>
       <div className="dashboard-grid">
         <div>
           <section className="panel">
@@ -668,10 +1260,109 @@ export function ExperimentDetailPage() {
               <div className="lock-row"><div><strong>Gentle Cleanser</strong><small>Locked</small></div><LockKeyhole size={17} /></div>
               <div className="lock-row"><div><strong>Barrier Moisturizer</strong><small>Locked</small></div><LockKeyhole size={17} /></div>
             </div>
+            <Link className="button" href={`/results/${experimentId}`} style={{ marginTop: 16 }}>
+              View result <ArrowRight size={18} />
+            </Link>
           </section>
           <section className="panel">
             <h3>Known limitation</h3>
             <p className="muted">The Jun 18 check-in included unusual sun exposure, reducing confidence by eight points.</p>
+          </section>
+        </aside>
+      </div>
+    </main>
+  );
+}
+
+function AuthenticatedExperimentDetail({ id }: { id: string }) {
+  const { apiFetch } = useAppState();
+  const [experiment, setExperiment] = useState<Experiment | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    void apiFetch(
+      `/api/v1/experiments/${encodeURIComponent(id)}`,
+      { cache: "no-store" }
+    ).then((response) => readApiResponse<Experiment>(response)).then((data) => {
+      if (active) setExperiment(data);
+    }).catch((loadError: unknown) => {
+      if (active) {
+        setError(loadError instanceof Error ? loadError.message : "The experiment could not be loaded.");
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [apiFetch, id]);
+
+  if (error) {
+    return (
+      <main className="page-shell" id="main">
+        <div className="callout danger" role="alert">{error}</div>
+      </main>
+    );
+  }
+  if (!experiment) {
+    return (
+      <main className="page-shell" id="main">
+        <section className="panel"><p>Loading experiment...</p></section>
+      </main>
+    );
+  }
+
+  return (
+    <main className="page-shell" id="main">
+      <h1 className="sr-only">{experiment.name}</h1>
+      <div className="dashboard-grid">
+        <div>
+          <section className="panel">
+            <div className="panel-header">
+              <div>
+                <h2>Recorded timeline</h2>
+                <p>Authenticated check-ins and attached normalized scans remain available across devices.</p>
+              </div>
+              <span className="status-pill">{experiment.checkIns.length} check-ins</span>
+            </div>
+            <div className="timeline">
+              <TimelineItem
+                date={new Date(experiment.startedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                title="Experiment started"
+                detail={`${experiment.suspectProductName} selected for one planned routine change.`}
+                tag="Plan"
+              />
+              {experiment.checkIns.map((item, index) => (
+                <TimelineItem
+                  key={item.id}
+                  date={new Date(item.occurredAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                  title={`Check-in ${index + 1}`}
+                  detail={
+                    item.confounders.length > 0
+                      ? item.confounders.join(", ")
+                      : `${item.adherence}% adherence · observation ${item.observation}/10`
+                  }
+                  tag={item.scanId ? "Scan" : "Observation"}
+                />
+              ))}
+              {experiment.checkIns.length === 0 ? (
+                <p className="muted">No check-ins yet. Add the first observation when the planned interval is complete.</p>
+              ) : null}
+            </div>
+          </section>
+        </div>
+        <aside>
+          <section className="panel next-action">
+            <p className="eyebrow"><FlaskConical size={13} /> Experiment rule</p>
+            <h2>One planned change</h2>
+            <div className="routine-lock">
+              <div className="lock-row">
+                <div><strong>{experiment.suspectProductName}</strong><small>{capitalize(experiment.type)}</small></div>
+                <Pause size={17} />
+              </div>
+            </div>
+            <Link className="button" href="/check-in" style={{ marginTop: 16 }}>
+              <Plus size={18} /> New check-in
+            </Link>
           </section>
         </aside>
       </div>
@@ -748,19 +1439,40 @@ export function ResultsPage() {
 
 export function PrivacyPage() {
   const router = useRouter();
-  const { retainImages, setRetainImages, deletedImageIds, deleteImage, reset } = useAppState();
+  const {
+    apiFetch,
+    authStatus,
+    retainImages,
+    setRetainImages,
+    deletedImageIds,
+    deleteImage,
+    reset,
+    signOut
+  } = useAppState();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
   const retainedScans = scans.slice(0, 3);
 
-  function deleteWorkspace() {
-    reset();
-    window.localStorage.removeItem("skincause-active-scan");
-    router.push("/");
+  async function deleteWorkspace() {
+    setDeleteError("");
+    try {
+      if (authStatus === "authenticated") {
+        await readApiResponse(await apiFetch("/api/v1/account", { method: "DELETE" }));
+        await signOut().catch(() => undefined);
+      }
+      reset();
+      window.localStorage.removeItem("skincause-active-scan");
+      window.localStorage.removeItem("skincause-latest-scan");
+      window.localStorage.removeItem("skincause-active-experiment");
+      router.push("/");
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : "The workspace could not be deleted.");
+    }
   }
 
   return (
     <main className="page-shell" id="main">
-      <PageHeading eyebrow="Privacy center" title="Your data, visible and removable" description="Original images and derived scores are separate controls. Removing an image does not erase the measurements unless you choose full deletion." />
+      <h1 className="sr-only">Privacy</h1>
       <div className="dashboard-grid">
         <div>
           <section className="panel">
@@ -770,7 +1482,7 @@ export function PrivacyPage() {
             </div>
           </section>
           <section className="panel">
-            <div className="panel-header"><div><h2>Original scan images</h2><p>Synthetic records for the seeded demo.</p></div><span className="status-pill">{retainedScans.length - deletedImageIds.length} retained</span></div>
+            <div className="panel-header"><div><h2>Original scan images</h2><p>Synthetic records for the demo workspace.</p></div><span className="status-pill">{retainedScans.length - deletedImageIds.length} retained</span></div>
             <div className="image-list">
               {retainedScans.map((scan, index) => {
                 const deleted = deletedImageIds.includes(scan.id);
@@ -807,8 +1519,9 @@ export function PrivacyPage() {
             ) : (
               <div className="callout danger">
                 <strong>This cannot be undone.</strong>
+                {deleteError ? <p className="form-error" role="alert">{deleteError}</p> : null}
                 <div className="row-actions" style={{ marginTop: 12 }}>
-                  <button className="button button-danger button-small" onClick={deleteWorkspace}><Check size={16} /> Confirm</button>
+                  <button className="button button-danger button-small" onClick={() => void deleteWorkspace()}><Check size={16} /> Confirm</button>
                   <button className="button button-secondary button-small" onClick={() => setConfirmDelete(false)}><XCircle size={16} /> Cancel</button>
                 </div>
               </div>

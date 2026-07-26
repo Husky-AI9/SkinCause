@@ -1,4 +1,5 @@
 import { calculateAssociation, associationLabel } from "@skincause/association-engine";
+import { classifyCosmeticConcern } from "@skincause/domain";
 import { describe, expect, it } from "vitest";
 
 const components = {
@@ -33,5 +34,14 @@ describe("association engine", () => {
   it("never uses prohibited definitive result language", () => {
     const result = calculateAssociation({ followUpCount: 3, knownDirection: true, components, usedConcerns: ["redness"] });
     expect(result.wording.toLowerCase()).not.toMatch(/\b(diagnosed|allergic|cured|safe)\b/);
+  });
+});
+
+describe("cosmetic concern severity", () => {
+  it("maps normalized concern scores to non-diagnostic display labels", () => {
+    expect(classifyCosmeticConcern(32)).toEqual({ level: "mild", label: "Mild concern" });
+    expect(classifyCosmeticConcern(44)).toEqual({ level: "moderate", label: "Moderate concern" });
+    expect(classifyCosmeticConcern(64)).toEqual({ level: "elevated", label: "Elevated concern" });
+    expect(classifyCosmeticConcern(null)).toEqual({ level: "unavailable", label: "Unavailable" });
   });
 });

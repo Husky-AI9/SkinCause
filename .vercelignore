@@ -1,0 +1,10 @@
+.env
+.env.*
+!.env.example
+.codex-runtime
+.openai
+node_modules
+test-results
+playwright-report
+tmp
+*.log
