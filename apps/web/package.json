@@ -11,6 +11,7 @@
     "lint": "eslint app components"
   },
   "dependencies": {
+    "@next/env": "^16.1.0",
     "@skincause/api-client": "*",
     "@skincause/association-engine": "*",
     "@skincause/contracts": "*",
