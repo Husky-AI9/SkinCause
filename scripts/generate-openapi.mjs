@@ -45,6 +45,18 @@ const document = {
     "/experiments/{id}/check-ins": { post: operation("Create a structured check-in", true) },
     "/experiments/{id}/complete": { post: operation("Freeze the deterministic result", true) },
     "/experiments/{id}/export": { get: operation("Export an investigation summary") },
+    "/experiments/{id}/recommendation": {
+      get: operation("Get the latest AI routine suggestion"),
+      post: operation("Generate one sourced add, remove, replace, keep, or no-change suggestion")
+    },
+    "/experiments/{id}/simulation": {
+      get: operation("Get or poll the illustrative YouCam skin simulation"),
+      post: operation("Start an illustrative YouCam skin simulation"),
+      delete: operation("Delete the generated simulation image")
+    },
+    "/experiments/{id}/simulation/image": {
+      get: operation("Read the private short-lived generated image")
+    },
     "/scans/upload-sessions": { post: operation("Create a resumable upload session", true) },
     "/scans/{id}/submit": { post: operation("Submit or resume provider analysis", true) },
     "/scans/{id}": { get: operation("Get resumable scan status") },

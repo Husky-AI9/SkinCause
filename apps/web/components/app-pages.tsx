@@ -2,12 +2,15 @@
 
 import type {
   Experiment,
+  RoutineRecommendation,
   Scan,
   ScanActivityEvent,
-  ScanUploadSession
+  ScanUploadSession,
+  SkinSimulation
 } from "@skincause/contracts";
 import {
   classifyCosmeticConcern,
+  insufficientResult,
   seededExperiment,
   scans,
   persistentDisclaimer
@@ -42,13 +45,16 @@ import {
   Waves,
   XCircle
 } from "lucide-react";
+import NextImage from "next/image";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { getSupabaseBrowserClient } from "../lib/supabase-browser";
 import { useAppState } from "./app-provider";
+import { YouCamCameraKit } from "./youcam-camera-kit";
 
 const experimentId = "brightening-serum-elimination";
+const aiCandidateProductId = "__ai_candidate_product__";
 
 type ScanStatusResponse = {
   scanId: string;
@@ -123,9 +129,13 @@ function mergeActivity(current: ScanActivityEvent[], incoming: ScanActivityEvent
 
 function orderedConcerns(scan: Scan) {
   const order = new Map([
-    ["pores", 0],
-    ["texture", 1],
-    ["redness", 2]
+    ["redness", 0],
+    ["blemish_pattern", 1],
+    ["texture", 2],
+    ["pores", 3],
+    ["oiliness", 4],
+    ["hydration", 5],
+    ["radiance", 6]
   ]);
   return [...scan.concerns].sort(
     (left, right) => (order.get(left.key) ?? 99) - (order.get(right.key) ?? 99)
@@ -139,11 +149,42 @@ function ConcernScoreIcon({ concernKey }: { concernKey: string }) {
   if (concernKey === "texture") {
     return <Waves size={18} aria-hidden="true" />;
   }
+  if (concernKey === "hydration" || concernKey === "oiliness") {
+    return <Droplets size={18} aria-hidden="true" />;
+  }
+  if (concernKey === "radiance") {
+    return <Sparkles size={18} aria-hidden="true" />;
+  }
+  if (concernKey === "blemish_pattern") {
+    return <CircleDot size={18} aria-hidden="true" />;
+  }
   return <Flame size={18} aria-hidden="true" />;
 }
 
 function initialConcernKey(scan: Scan) {
   return scan.concerns.find((concern) => concern.maskUrl)?.key ?? null;
+}
+
+async function readBrowserImageDimensions(file: File) {
+  if ("createImageBitmap" in window) {
+    const bitmap = await createImageBitmap(file);
+    const dimensions = { width: bitmap.width, height: bitmap.height };
+    bitmap.close();
+    return dimensions;
+  }
+  return new Promise<{ width: number; height: number }>((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      resolve({ width: image.naturalWidth, height: image.naturalHeight });
+      URL.revokeObjectURL(url);
+    };
+    image.onerror = () => {
+      reject(new Error("The image dimensions could not be read."));
+      URL.revokeObjectURL(url);
+    };
+    image.src = url;
+  });
 }
 
 export function ConsentPage() {
@@ -184,7 +225,10 @@ export function ConsentPage() {
             <div className="toggle-row">
               <div>
                 <strong>Retain original scan images</strong>
-                <p className="muted">Off by default. Derived scores can still be used in your timeline.</p>
+                <p className="muted">
+                  Off by default. Derived scores still work in your timeline. A retained baseline
+                  image is required only if you choose to generate an illustrative skin simulation.
+                </p>
               </div>
               <button
                 type="button"
@@ -468,6 +512,7 @@ export function ScanPage() {
   const [result, setResult] = useState<Scan | null>(null);
   const [activeConcern, setActiveConcern] = useState<string | null>(null);
   const [usingDemoImage, setUsingDemoImage] = useState(false);
+  const [capturedWithCameraKit, setCapturedWithCameraKit] = useState(false);
   const [error, setError] = useState("");
   const [status, setStatus] = useState<ScanWorkflowStatus>("idle");
   const [activity, setActivity] = useState<ScanActivityEvent[]>([]);
@@ -521,6 +566,7 @@ export function ScanPage() {
       setPreviewUrl(URL.createObjectURL(file));
       setFileName(file.name);
       setUsingDemoImage(true);
+      setCapturedWithCameraKit(false);
       setResult(null);
       setActiveConcern(null);
       setStatus("ready");
@@ -543,7 +589,7 @@ export function ScanPage() {
     };
   }, [previewUrl]);
 
-  function chooseFile(file?: File) {
+  const chooseFile = useCallback(async (file?: File) => {
     setError("");
     if (!file) return;
     if (!["image/jpeg", "image/png"].includes(file.type)) {
@@ -560,10 +606,24 @@ export function ScanPage() {
       ]));
       return;
     }
+    try {
+      const dimensions = await readBrowserImageDimensions(file);
+      if (Math.min(dimensions.width, dimensions.height) < 480) {
+        setError("Choose an image at least 480 pixels on its shortest side.");
+        setActivity((current) => mergeActivity(current, [
+          localActivity("client", "image validation rejected: dimensions below SD minimum", "error")
+        ]));
+        return;
+      }
+    } catch {
+      setError("The image could not be read. Choose another JPG or PNG.");
+      return;
+    }
     setSelectedFile(file);
     setPreviewUrl(URL.createObjectURL(file));
     setFileName(file.name);
     setUsingDemoImage(false);
+    setCapturedWithCameraKit(false);
     setResult(null);
     setActiveConcern(null);
     setStatus("ready");
@@ -574,7 +634,12 @@ export function ScanPage() {
         "success"
       )
     ]);
-  }
+  }, []);
+
+  const acceptCameraKitCapture = useCallback(async (file: File) => {
+    await chooseFile(file);
+    setCapturedWithCameraKit(true);
+  }, [chooseFile]);
 
   async function submitScan() {
     if (!selectedFile) return;
@@ -643,7 +708,10 @@ export function ScanPage() {
         await apiFetch(`/api/v1/scans/${encodeURIComponent(uploadSession.scanId)}/submit`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ clientRequestId })
+          body: JSON.stringify({
+            clientRequestId,
+            captureSource: capturedWithCameraKit ? "camera-kit" : "upload"
+          })
         })
       );
       setActivity((current) => mergeActivity(current, submitted.activity ?? []));
@@ -688,7 +756,7 @@ export function ScanPage() {
             <div>
               <div className="face-guide" aria-hidden="true"><Focus size={50} /></div>
               <p style={{ marginTop: 18, marginBottom: 4 }}><strong>Center your face inside the guide</strong></p>
-              <p className="muted">Front-facing · neutral expression · eyes open</p>
+              <p className="muted">Face fills 60–80% · even front lighting · neutral expression · eyes open</p>
             </div>
           )}
         </section>
@@ -700,9 +768,10 @@ export function ScanPage() {
               ref={fileRef}
               type="file"
               accept="image/jpeg,image/png"
-              onChange={(event) => chooseFile(event.target.files?.[0])}
+              onChange={(event) => void chooseFile(event.target.files?.[0])}
               aria-label="Choose a JPG or PNG image"
             />
+            {status === "idle" ? <YouCamCameraKit onCapture={acceptCameraKitCapture} /> : null}
             {usingDemoImage && status === "ready" ? (
               <div className="callout" role="status">
                 <strong>Synthetic test image ready</strong>
@@ -713,9 +782,15 @@ export function ScanPage() {
             {(fileName || status === "ready") && !error && (
               <div className="quality-box" style={{ marginTop: 14 }}>
                 <strong>{fileName || "Resumable scan found"}</strong>
-                <p className="muted">Basic format and size checks passed. Final framing is checked after upload.</p>
+                <p className="muted">Format, file size, and SD dimensions passed. Final face and lighting checks occur during analysis.</p>
               </div>
             )}
+            {status === "idle" ? (
+              <div className="quality-box" style={{ marginTop: 14 }}>
+                <strong>For repeatable measurements</strong>
+                <p className="muted">Use the same camera and lighting each time. Keep hair off your forehead and remove glasses or makeup when practical.</p>
+              </div>
+            ) : null}
             {status === "idle" && (
               <div className="scan-source-actions">
                 <button className="button" onClick={() => fileRef.current?.click()}>
@@ -769,7 +844,7 @@ export function ScanPage() {
                           key={concern.key}
                         >
                           <ConcernScoreIcon concernKey={concern.key} />
-                          <span className="scan-score-label">{concern.providerLabel}</span>
+                          <span className="scan-score-label">{concern.displayLabel ?? concern.providerLabel}</span>
                           <strong>
                             {concern.normalizedSeverity === null
                               ? "n/a"
@@ -796,6 +871,7 @@ export function ScanPage() {
                 setPreviewUrl("");
                 setFileName("");
                 setUsingDemoImage(false);
+                setCapturedWithCameraKit(false);
                 setResult(null);
                 setActiveConcern(null);
                 setActivity([]);
@@ -925,7 +1001,7 @@ function ConcernVisualization({
           className="concern-base-image"
           role="img"
           aria-label={active
-            ? `${active.providerLabel} visual pattern overlay on the analyzed image`
+            ? `${active.displayLabel ?? active.providerLabel} visual pattern overlay on the analyzed image`
             : "Original analyzed image"}
           style={{ backgroundImage: `url(${imageUrl})` }}
         />
@@ -938,7 +1014,7 @@ function ConcernVisualization({
         ) : null}
         <span className="concern-visual-label">
           {active
-            ? `${active.providerLabel} observed pattern`
+            ? `${active.displayLabel ?? active.providerLabel} observed pattern`
             : "Original image"}
         </span>
       </div>
@@ -962,12 +1038,13 @@ function ConcernVisualization({
                 onClick={() => onSelectConcern(concern.key)}
               >
                 <span className={`concern-swatch concern-swatch-${concern.key}`} aria-hidden="true" />
-                {concern.providerLabel}
+                {concern.displayLabel ?? concern.providerLabel}
               </button>
             ))}
           </div>
           <p className="concern-visual-note">
             Highlights show AI-observed cosmetic patterns from this scan, not a diagnosis.
+            Provider overlays are temporary and are not retained after this result view.
           </p>
         </>
       ) : (
@@ -982,10 +1059,82 @@ function ConcernVisualization({
 
 export function ExperimentPlannerPage() {
   const router = useRouter();
-  const { apiFetch, authStatus, products } = useAppState();
+  const searchParams = useSearchParams();
+  const { addProduct, apiFetch, authStatus, products } = useAppState();
   const [type, setType] = useState<"elimination" | "reintroduction">("elimination");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [baseline, setBaseline] = useState<Scan | null>(null);
+  const [selectedProductId, setSelectedProductId] = useState("");
+  const [selectedMeasurements, setSelectedMeasurements] = useState<string[] | null>(null);
+  const [hypothesis, setHypothesis] = useState(
+    "Observe whether the selected visible patterns change while this one routine step is adjusted."
+  );
+  const [appliedRecommendation, setAppliedRecommendation] =
+    useState<RoutineRecommendation | null>(null);
+  const stagedCandidateIdRef = useRef<string | null>(null);
+  const evidenceExperimentId =
+    searchParams.get("from") ?? (authStatus === "authenticated" ? null : experimentId);
+  const availableConcerns = (baseline?.concerns ?? scans[0].concerns)
+    .filter((concern) => concern.experimentRole === "primary");
+  const defaultMeasurementKeys = availableConcerns.slice(0, 2).map((concern) => concern.key);
+  const selectedMeasurementKeys = selectedMeasurements ?? defaultMeasurementKeys;
+  const effectiveProductId = selectedProductId || products[0]?.id || "";
+
+  useEffect(() => {
+    if (authStatus !== "authenticated") return;
+    const scanId = window.localStorage.getItem("skincause-latest-scan");
+    if (!scanId) {
+      const timer = window.setTimeout(() => {
+        setError("Complete a baseline scan before planning an experiment.");
+      }, 0);
+      return () => window.clearTimeout(timer);
+    }
+    void apiFetch(`/api/v1/scans/${encodeURIComponent(scanId)}`, { cache: "no-store" })
+      .then((response) => readApiResponse<ScanStatusResponse>(response))
+      .then((scan) => {
+        if (!scan.result) throw new Error("The baseline scan is not ready.");
+        setBaseline(scan.result);
+      })
+      .catch((loadError: unknown) => {
+        setError(loadError instanceof Error ? loadError.message : "The baseline scan could not be loaded.");
+      });
+  }, [apiFetch, authStatus]);
+
+  function applyRoutineRecommendation(recommendation: RoutineRecommendation) {
+    const availableKeys = new Set(availableConcerns.map((concern) => concern.key));
+    const recommendedMeasurements = recommendation.measurementKeys
+      .filter((key) => availableKeys.has(key))
+      .slice(0, 3);
+    if (recommendedMeasurements.length > 0) {
+      setSelectedMeasurements(recommendedMeasurements);
+    }
+
+    if (
+      (recommendation.action === "replace" || recommendation.action === "add") &&
+      recommendation.candidateProduct
+    ) {
+      setType("reintroduction");
+      setSelectedProductId(aiCandidateProductId);
+    } else if (recommendation.existingProductId) {
+      if (recommendation.action === "remove") setType("elimination");
+      setSelectedProductId(recommendation.existingProductId);
+    }
+
+    setHypothesis(recommendation.summary);
+    setAppliedRecommendation(recommendation);
+    stagedCandidateIdRef.current = null;
+    setError("");
+  }
+
+  function toggleMeasurement(key: string) {
+    setSelectedMeasurements((current) => {
+      const selected = current ?? defaultMeasurementKeys;
+      return selected.includes(key)
+        ? selected.filter((item) => item !== key)
+        : [...selected, key].slice(0, 3);
+    });
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -994,18 +1143,59 @@ export function ExperimentPlannerPage() {
       return;
     }
     const data = new FormData(event.currentTarget);
+    const primaryConcerns = data.getAll("primaryConcerns").map(String);
+    if (!baseline || primaryConcerns.length === 0) {
+      setError("Choose at least one baseline measurement.");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
+      const startedAt = new Date(String(data.get("startedAt"))).toISOString();
+      let suspectProductId = String(data.get("suspectProductId"));
+      if (suspectProductId === aiCandidateProductId) {
+        const candidate = appliedRecommendation?.candidateProduct;
+        if (!candidate) {
+          throw new Error("Generate an AI routine suggestion before selecting a new product.");
+        }
+        const matchingProduct = products.find((product) =>
+          product.name.trim().toLowerCase() === candidate.name.trim().toLowerCase() &&
+          product.brand.trim().toLowerCase() === candidate.brand.trim().toLowerCase()
+        );
+        if (matchingProduct) {
+          suspectProductId = matchingProduct.id;
+        } else if (stagedCandidateIdRef.current) {
+          suspectProductId = stagedCandidateIdRef.current;
+        } else {
+          const replacedProduct = appliedRecommendation.existingProductId
+            ? products.find((product) => product.id === appliedRecommendation.existingProductId)
+            : null;
+          const createdCandidate = await addProduct({
+            name: candidate.name,
+            brand: candidate.brand,
+            category: candidate.category,
+            startedAt,
+            cadence: replacedProduct?.cadence ?? "daily",
+            timeOfDay: replacedProduct?.timeOfDay ?? "PM",
+            active: true,
+            recentlyChanged: true
+          });
+          stagedCandidateIdRef.current = createdCandidate.id;
+          suspectProductId = createdCandidate.id;
+        }
+      }
       const experiment = await readApiResponse<Experiment>(
         await apiFetch("/api/v1/experiments", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             type,
-            suspectProductId: String(data.get("suspectProductId")),
-            startedAt: new Date(String(data.get("startedAt"))).toISOString(),
-            hypothesis: String(data.get("hypothesis"))
+            suspectProductId,
+            startedAt,
+            hypothesis: String(data.get("hypothesis")),
+            baselineScanId: baseline.id,
+            analysisProfileVersion: baseline.analysisProfileVersion ?? "routine-sd-v1",
+            primaryConcerns
           })
         })
       );
@@ -1022,47 +1212,100 @@ export function ExperimentPlannerPage() {
   return (
     <main className="page-shell" id="main">
       <PageHeading eyebrow="Step 4 of 4" title="Plan one clear change" description="Select one suspect product. Every other routine step becomes a locked snapshot for the duration of the investigation." />
-      <form className="dashboard-grid" onSubmit={submit}>
-        <section className="panel">
-          <div className="form-grid">
+      <form onSubmit={submit}>
+        <div className="planner-stack">
+          <section className="panel">
+            <div className="form-grid">
             <div className="field full">
-              <span className="field-label">Experiment type</span>
+              <span className="field-label">Planned change</span>
               <div className="segmented" style={{ gridTemplateColumns: "repeat(2, 1fr)" }}>
-                <button type="button" className={type === "elimination" ? "is-active" : ""} onClick={() => setType("elimination")}>Elimination</button>
-                <button type="button" className={type === "reintroduction" ? "is-active" : ""} onClick={() => setType("reintroduction")}>Reintroduction</button>
+                <button type="button" className={type === "elimination" ? "is-active" : ""} onClick={() => setType("elimination")}>Suspend product</button>
+                <button type="button" className={type === "reintroduction" ? "is-active" : ""} onClick={() => setType("reintroduction")}>Add / replace product</button>
               </div>
             </div>
             <div className="field full">
               <label htmlFor="suspect">Suspect product</label>
-              <select id="suspect" name="suspectProductId" required>
+              <select
+                id="suspect"
+                name="suspectProductId"
+                value={effectiveProductId}
+                onChange={(event) => setSelectedProductId(event.target.value)}
+                required
+              >
                 {products.map((product) => <option value={product.id} key={product.id}>{product.name}{product.recentlyChanged ? " · recently changed" : ""}</option>)}
+                {appliedRecommendation?.candidateProduct ? (
+                  <option value={aiCandidateProductId}>
+                    AI replacement · {appliedRecommendation.candidateProduct.brand}{" "}
+                    {appliedRecommendation.candidateProduct.name}
+                  </option>
+                ) : null}
               </select>
+              {appliedRecommendation ? (
+                <small className="ai-applied-note">
+                  AI applied: {recommendationActionLabel(appliedRecommendation.action)}
+                  {appliedRecommendation.candidateProduct
+                    ? ` · ${appliedRecommendation.candidateProduct.brand} ${appliedRecommendation.candidateProduct.name}`
+                    : ""}
+                </small>
+              ) : null}
             </div>
             <div className="field">
               <label htmlFor="start-date">Start date</label>
               <input id="start-date" name="startedAt" type="date" defaultValue="2026-07-24" required />
             </div>
-            <div className="field">
-              <label htmlFor="primary-concern">Primary concern</label>
-              <select id="primary-concern"><option>Redness</option><option>Texture</option><option>Pores</option></select>
+            <div className="field full">
+              <span className="field-label">Measurements to compare</span>
+              <div className="form-grid">
+                {availableConcerns.map((concern) => (
+                    <label className="check-row" key={concern.key}>
+                      <input
+                        type="checkbox"
+                        name="primaryConcerns"
+                        value={concern.key}
+                        checked={selectedMeasurementKeys.includes(concern.key)}
+                        onChange={() => toggleMeasurement(concern.key)}
+                      />
+                      <span>{concern.displayLabel ?? concern.providerLabel}</span>
+                    </label>
+                  ))}
+              </div>
+              <small>These measurements are locked to the baseline profile for every follow-up.</small>
             </div>
             <div className="field full">
               <label htmlFor="hypothesis">What are you trying to observe?</label>
-              <textarea id="hypothesis" name="hypothesis" defaultValue="Observe whether redness and texture change while the serum is paused." required />
+              <textarea
+                id="hypothesis"
+                name="hypothesis"
+                value={hypothesis}
+                onChange={(event) => setHypothesis(event.target.value)}
+                required
+              />
             </div>
-          </div>
-        </section>
-        <aside>
-          <section className="panel next-action">
-            <p className="eyebrow"><LockKeyhole size={13} /> Single-variable policy</p>
-            <h2>Everything else stays consistent</h2>
-            <p>SkinCause will mark a check-in as confounded if another routine step changes during this experiment.</p>
-            {error ? <p className="form-error" role="alert">{error}</p> : null}
-            <button className="button" type="submit" disabled={busy || products.length === 0}>
-              {busy ? "Starting..." : "Start investigation"} <ArrowRight size={18} />
-            </button>
+            </div>
+            {evidenceExperimentId ? (
+              <ExperimentAiTools
+                id={evidenceExperimentId}
+                onApplyRecommendation={applyRoutineRecommendation}
+              />
+            ) : (
+              <section className="experiment-ai-panel experiment-ai-panel--embedded">
+                <p className="eyebrow"><Sparkles size={13} /> AI-assisted next change</p>
+                <h2>Available after your first completed experiment</h2>
+                <p className="muted">
+                  OpenAI uses recorded experiment evidence to suggest an addition, removal, or
+                  replacement. YouCam needs a retained baseline and comparable follow-up scan to
+                  generate the illustrative after-experiment image.
+                </p>
+              </section>
+            )}
+            <div className="planner-submit">
+              {error ? <p className="form-error" role="alert">{error}</p> : null}
+              <button className="button" type="submit" disabled={busy || products.length === 0}>
+                {busy ? "Starting..." : "Start investigation"} <ArrowRight size={18} />
+              </button>
+            </div>
           </section>
-        </aside>
+        </div>
       </form>
     </main>
   );
@@ -1156,8 +1399,8 @@ export function CheckInPage() {
               <Eye size={24} />
             </div>
             <div className="range-wrap">
-              <div className="metric-label"><span>Redness or discomfort</span><strong>{observation}/10</strong></div>
-              <input aria-label="Redness or discomfort from 0 to 10" type="range" min="0" max="10" value={observation} onChange={(event) => setObservation(Number(event.target.value))} />
+              <div className="metric-label"><span>Selected visible patterns or discomfort</span><strong>{observation}/10</strong></div>
+              <input aria-label="Selected visible patterns or discomfort from 0 to 10" type="range" min="0" max="10" value={observation} onChange={(event) => setObservation(Number(event.target.value))} />
               <div className="range-labels"><span>None noticed</span><span>Most noticeable</span></div>
             </div>
           </section>
@@ -1274,6 +1517,347 @@ export function ExperimentDetailPage({ id = experimentId }: { id?: string }) {
   );
 }
 
+function recommendationActionLabel(action: RoutineRecommendation["action"]) {
+  return {
+    remove: "Remove from routine",
+    replace: "Replace one product",
+    add: "Add one product",
+    keep: "Keep one product",
+    no_change: "Keep routine stable"
+  }[action];
+}
+
+function ExperimentAiTools({
+  id,
+  onApplyRecommendation
+}: {
+  id: string;
+  onApplyRecommendation?(recommendation: RoutineRecommendation): void;
+}) {
+  const { apiFetch, authStatus } = useAppState();
+  const [recommendation, setRecommendation] = useState<RoutineRecommendation | null>(null);
+  const [simulation, setSimulation] = useState<SkinSimulation | null>(null);
+  const [simulationBlobUrl, setSimulationBlobUrl] = useState("");
+  const [recommendationBusy, setRecommendationBusy] = useState(false);
+  const [simulationBusy, setSimulationBusy] = useState(false);
+  const [recommendationError, setRecommendationError] = useState("");
+  const [simulationError, setSimulationError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    void apiFetch(`/api/v1/experiments/${encodeURIComponent(id)}/recommendation`, {
+        cache: "no-store"
+      })
+      .then((response) => readApiResponse<RoutineRecommendation | null>(response))
+      .then((loadedRecommendation) => {
+        if (active) setRecommendation(loadedRecommendation);
+      })
+      .catch(() => {
+        // A saved recommendation is optional; generation remains available.
+      });
+    return () => {
+      active = false;
+    };
+  }, [apiFetch, id]);
+
+  useEffect(() => {
+    if (simulation?.status !== "queued" && simulation?.status !== "processing") return;
+    const timer = window.setTimeout(() => {
+      void apiFetch(`/api/v1/experiments/${encodeURIComponent(id)}/simulation`, {
+        cache: "no-store"
+      })
+        .then((response) => readApiResponse<SkinSimulation | null>(response))
+        .then((updated) => {
+          setSimulation(updated);
+          if (updated?.status === "failed") {
+            setSimulationError(updated.error?.message ?? "The illustration could not be generated.");
+          }
+        })
+        .catch((pollError: unknown) => {
+          setSimulationError(
+            pollError instanceof Error ? pollError.message : "Simulation status is unavailable."
+          );
+        });
+    }, simulation.pollAfterMs ?? 2000);
+    return () => window.clearTimeout(timer);
+  }, [apiFetch, id, simulation]);
+
+  useEffect(() => {
+    if (
+      simulation?.status !== "succeeded" ||
+      !simulation.imageUrl ||
+      simulation.imageUrl.startsWith("/images/")
+    ) return;
+    let active = true;
+    let objectUrl = "";
+    void apiFetch(simulation.imageUrl, { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("The generated image could not be loaded.");
+        return response.blob();
+      })
+      .then((blob) => {
+        if (!active) return;
+        objectUrl = URL.createObjectURL(blob);
+        setSimulationBlobUrl(objectUrl);
+      })
+      .catch((imageError: unknown) => {
+        if (active) {
+          setSimulationError(
+            imageError instanceof Error ? imageError.message : "The generated image is unavailable."
+          );
+        }
+      });
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [apiFetch, simulation]);
+
+  async function generateRecommendation() {
+    setRecommendationBusy(true);
+    setRecommendationError("");
+    try {
+      const response = await apiFetch(
+        `/api/v1/experiments/${encodeURIComponent(id)}/recommendation`,
+        { method: "POST" }
+      );
+      const generated = await readApiResponse<RoutineRecommendation>(response);
+      setRecommendation(generated);
+      onApplyRecommendation?.(generated);
+    } catch (error) {
+      setRecommendationError(
+        error instanceof Error ? error.message : "The routine suggestion could not be generated."
+      );
+    } finally {
+      setRecommendationBusy(false);
+    }
+  }
+
+  async function generateSimulation() {
+    const regenerate = simulation?.status === "succeeded";
+    setSimulationBusy(true);
+    setSimulationError("");
+    setSimulation(null);
+    setSimulationBlobUrl("");
+    try {
+      if (regenerate) {
+        const deleted = await apiFetch(
+          `/api/v1/experiments/${encodeURIComponent(id)}/simulation`,
+          { method: "DELETE" }
+        );
+        await readApiResponse(deleted);
+      }
+      const response = await apiFetch(
+        `/api/v1/experiments/${encodeURIComponent(id)}/simulation`,
+        { method: "POST" }
+      );
+      const started = await readApiResponse<SkinSimulation>(response);
+      setSimulation(started);
+      if (started.status === "failed") {
+        setSimulationError(started.error?.message ?? "The illustration could not be generated.");
+      }
+    } catch (error) {
+      setSimulationError(
+        error instanceof Error ? error.message : "The illustration could not be generated."
+      );
+    } finally {
+      setSimulationBusy(false);
+    }
+  }
+
+  async function deleteSimulation() {
+    setSimulationBusy(true);
+    setSimulationError("");
+    try {
+      const response = await apiFetch(
+        `/api/v1/experiments/${encodeURIComponent(id)}/simulation`,
+        { method: "DELETE" }
+      );
+      await readApiResponse(response);
+      setSimulation(null);
+      setSimulationBlobUrl("");
+    } catch (error) {
+      setSimulationError(
+        error instanceof Error ? error.message : "The generated image could not be deleted."
+      );
+    } finally {
+      setSimulationBusy(false);
+    }
+  }
+
+  const simulationImage =
+    simulation?.status === "succeeded" && simulation.imageUrl?.startsWith("/images/")
+      ? simulation.imageUrl
+      : simulationBlobUrl;
+
+  return (
+    <section className="experiment-ai-panel experiment-ai-panel--embedded">
+      <div className="panel-header">
+        <div>
+          <p className="eyebrow"><Sparkles size={13} /> AI experiment studio</p>
+          <h2>Use prior evidence to plan this one change</h2>
+          <p>
+            OpenAI may suggest an addition, removal, or replacement. The YouCam result illustrates
+            the recorded experiment outcome and expires after 24 hours.
+          </p>
+        </div>
+      </div>
+      <div className="experiment-ai-grid">
+        <article className="ai-tool-card">
+          <div className="ai-tool-heading">
+            <div>
+              <span className="status-pill">OpenAI</span>
+              <h3>Routine suggestion</h3>
+            </div>
+            <ListRestart size={22} />
+          </div>
+          {recommendation ? (
+            <>
+              <p className="eyebrow">{recommendationActionLabel(recommendation.action)}</p>
+              <p><strong>{recommendation.summary}</strong></p>
+              {recommendation.existingProductName ? (
+                <p className="muted">Current product: {recommendation.existingProductName}</p>
+              ) : null}
+              {recommendation.candidateProduct ? (
+                <div className="candidate-product">
+                  <small>Suggested candidate</small>
+                  <strong>
+                    {recommendation.candidateProduct.brand}{" "}
+                    {recommendation.candidateProduct.name}
+                  </strong>
+                  <span>{recommendation.candidateProduct.category}</span>
+                  {recommendation.candidateProduct.productUrl ? (
+                    <a
+                      href={recommendation.candidateProduct.productUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Verify product source
+                    </a>
+                  ) : null}
+                </div>
+              ) : null}
+              <ul className="compact-list">
+                {recommendation.rationale.map((item) => <li key={item}>{item}</li>)}
+              </ul>
+              {recommendation.sources.length > 0 ? (
+                <div className="recommendation-sources">
+                  <small>Web sources</small>
+                  {recommendation.sources.map((source) => (
+                    <a key={source.url} href={source.url} target="_blank" rel="noreferrer">
+                      {source.title}
+                    </a>
+                  ))}
+                </div>
+              ) : null}
+              <p className="callout compact">{recommendation.uncertainty}</p>
+              <p className="fine-print">{recommendation.disclaimer}</p>
+            </>
+          ) : (
+            <p className="muted">
+              Generate one add, remove, replace, or keep suggestion using experiment evidence and
+              current web product information.
+            </p>
+          )}
+          {recommendationError ? (
+            <p className="callout danger" role="alert">{recommendationError}</p>
+          ) : null}
+          <button
+            type="button"
+            className="button button-secondary"
+            disabled={recommendationBusy}
+            onClick={() => void generateRecommendation()}
+          >
+            <Sparkles size={17} />
+            {recommendationBusy
+              ? "Applying AI suggestion..."
+              : "AI routine suggestion"}
+          </button>
+        </article>
+
+        <article className="ai-tool-card">
+          <div className="ai-tool-heading">
+            <div>
+              <span className="status-pill">YouCam simulation</span>
+              <h3>Illustrative improvement from recorded change</h3>
+            </div>
+            <ScanFace size={22} />
+          </div>
+          {simulationImage ? (
+            <div className="simulation-result">
+              <NextImage
+                src={simulationImage}
+                alt="AI-generated illustrative skin appearance based on recorded cosmetic measurements"
+                width={640}
+                height={640}
+                unoptimized
+              />
+              <span className="simulation-label">AI-generated illustration</span>
+            </div>
+          ) : simulation?.status === "queued" || simulation?.status === "processing" ? (
+            <div className="simulation-loading" role="status">
+              <span className="spinner" />
+              <p>YouCam is generating the illustration...</p>
+            </div>
+          ) : (
+            <p className="muted">
+              Uses the retained baseline image and latest follow-up measurements. It does not
+              predict what a product will do.
+            </p>
+          )}
+          {simulation?.expiresAt && simulation.status === "succeeded" ? (
+            <p className="fine-print">
+              Private image expires {new Date(simulation.expiresAt).toLocaleString()}.
+            </p>
+          ) : null}
+          {simulationError ? (
+            <p className="callout danger" role="alert">{simulationError}</p>
+          ) : null}
+          <p className="fine-print">
+            {simulation?.disclaimer ??
+              "The generated appearance is an illustration, not a diagnosis, forecast, or guarantee."}
+          </p>
+          {authStatus === "guest" || authStatus === "demo" ? (
+            <p className="fine-print">
+              Demo mode uploads the same synthetic face shown on the Scan page. Signed-in
+              simulations use the retained baseline from the selected experiment.
+            </p>
+          ) : null}
+          <div className="button-row">
+            <button
+              type="button"
+              className="button"
+              disabled={
+                simulationBusy ||
+                simulation?.status === "queued" ||
+                simulation?.status === "processing"
+              }
+              onClick={() => void generateSimulation()}
+            >
+              <Sparkles size={17} />
+              {simulationBusy
+                ? "Starting..."
+                : simulation?.status === "succeeded"
+                  ? "Regenerate illustration"
+                  : "Generate illustration"}
+            </button>
+            {simulation?.status === "succeeded" ? (
+              <button
+                type="button"
+                className="button button-quiet"
+                disabled={simulationBusy}
+                onClick={() => void deleteSimulation()}
+              >
+                <Trash2 size={17} /> Delete
+              </button>
+            ) : null}
+          </div>
+        </article>
+      </div>
+    </section>
+  );
+}
+
 function AuthenticatedExperimentDetail({ id }: { id: string }) {
   const { apiFetch } = useAppState();
   const [experiment, setExperiment] = useState<Experiment | null>(null);
@@ -1364,21 +1948,66 @@ function AuthenticatedExperimentDetail({ id }: { id: string }) {
               <Plus size={18} /> New check-in
             </Link>
           </section>
+          {experiment.result ? (
+            <section className="panel">
+              <p className="eyebrow">Current evidence</p>
+              <h3>{capitalize(experiment.result.associationLevel)} association</h3>
+              <p className="muted">{experiment.result.wording}</p>
+              <p><strong>Visible trend:</strong> {experiment.result.components.imageTrend}/100</p>
+              <p><strong>Measurements:</strong> {experiment.result.usedConcerns.join(", ")}</p>
+              <Link className="button button-secondary" href={`/results/${experiment.id}`}>
+                View explainable result <ArrowRight size={18} />
+              </Link>
+            </section>
+          ) : null}
         </aside>
       </div>
     </main>
   );
 }
 
-export function ResultsPage() {
-  const result = seededExperiment.result;
+export function ResultsPage({ id = experimentId }: { id?: string }) {
+  const { apiFetch, authStatus } = useAppState();
+  const [loadedExperiment, setLoadedExperiment] = useState<Experiment | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (authStatus !== "authenticated") return;
+    let active = true;
+    void apiFetch(`/api/v1/experiments/${encodeURIComponent(id)}`, { cache: "no-store" })
+      .then((response) => readApiResponse<Experiment>(response))
+      .then((loaded) => {
+        if (active) setLoadedExperiment(loaded);
+      })
+      .catch((loadError: unknown) => {
+        if (active) {
+          setError(loadError instanceof Error ? loadError.message : "The result could not be loaded.");
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [apiFetch, authStatus, id]);
+
+  const experiment = authStatus === "authenticated" ? loadedExperiment : seededExperiment;
+  if (error) {
+    return <main className="page-shell" id="main"><div className="callout danger" role="alert">{error}</div></main>;
+  }
+  if (!experiment) {
+    return <main className="page-shell" id="main"><section className="panel"><p>Loading result...</p></section></main>;
+  }
+  const result = experiment.result ?? insufficientResult;
+  const currentExperiment = experiment;
 
   function exportJson() {
-    const blob = new Blob([JSON.stringify({ experiment: seededExperiment, disclaimer: persistentDisclaimer }, null, 2)], { type: "application/json" });
+    const blob = new Blob([JSON.stringify({
+      experiment: { ...currentExperiment, result },
+      disclaimer: persistentDisclaimer
+    }, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = "skincause-brightening-serum-result.json";
+    anchor.download = `skincause-${currentExperiment.id}-result.json`;
     anchor.click();
     URL.revokeObjectURL(url);
   }
@@ -1388,7 +2017,7 @@ export function ResultsPage() {
       <PageHeading eyebrow="Experiment result" title="What the available evidence shows" description="A measured summary with every contribution and limitation kept visible." />
       <section className="result-hero">
         <div>
-          <p className="eyebrow">Brightening serum elimination</p>
+          <p className="eyebrow">{experiment.name}</p>
           <div className="result-label">{capitalize(result.associationLevel)} association</div>
           <p>{result.wording}</p>
           <p className="muted">This score ranks evidence strength inside this experiment. It is not the probability that a product produced a condition.</p>
@@ -1409,7 +2038,7 @@ export function ResultsPage() {
         <details className="disclosure" open>
           <summary>Why this result?</summary>
           <div className="disclosure-body">
-            <p>The normalized redness and texture measurements decreased across a majority of valid follow-ups. Your observations moved in the same direction and adherence was complete.</p>
+            <p>Comparable measurements were evaluated against the locked baseline in the expected direction for this {experiment.type} experiment.</p>
             <p><strong>Measurements used:</strong> {result.usedConcerns.join(", ")}.</p>
           </div>
         </details>
@@ -1428,7 +2057,12 @@ export function ResultsPage() {
       </section>
 
       <div className="row-actions" style={{ marginTop: 24 }}>
-        <Link className="button" href="/experiments/new"><ListRestart size={18} /> Plan reintroduction</Link>
+        <Link
+          className="button"
+          href={`/experiments/new?from=${encodeURIComponent(experiment.id)}`}
+        >
+          <ListRestart size={18} /> Plan reintroduction
+        </Link>
         <button className="button button-secondary" onClick={exportJson}><FileJson size={18} /> Export JSON</button>
         <button className="button button-secondary" onClick={() => window.print()}><Printer size={18} /> Print summary</button>
       </div>

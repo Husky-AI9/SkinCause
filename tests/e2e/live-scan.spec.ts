@@ -19,7 +19,9 @@ test("uploads a real face image and renders live YouCam results", async ({ page 
   await page.getByRole("button", { name: "Analyze image" }).click();
 
   await expect(page.getByText("Scan complete")).toBeVisible({ timeout: 150_000 });
-  await expect(page.getByText(/Redness|Texture|Pores/).first()).toBeVisible();
+  await expect(
+    page.getByText(/Visible redness pattern|Texture variation|Pore visibility/).first()
+  ).toBeVisible();
   await expect(page.getByText("Agent test mode", { exact: true })).toBeVisible();
   await expect(page.getByText(/\[agent\] deterministic test task created/)).toBeVisible();
   await expect(page.getByText(/\[agent\] test output normalized:/)).toBeVisible();

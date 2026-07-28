@@ -13,12 +13,21 @@ export async function POST(
 ) {
   try {
     const { id } = await context.params;
-    const body = (await request.json().catch(() => ({}))) as { concerns?: string[] };
+    const body = (await request.json().catch(() => ({}))) as {
+      concerns?: string[];
+      captureSource?: "upload" | "camera-kit";
+    };
     const actor = await resolveRequestActor(request);
     const provider = createSkinAnalysisProvider();
     const result = actor.kind === "authenticated"
-      ? await createPersistentScanService(actor).submitScan(actor.userId, id, provider, body.concerns)
-      : await serverServices.submitScan(id, provider, body.concerns);
+      ? await createPersistentScanService(actor).submitScan(
+          actor.userId,
+          id,
+          provider,
+          body.concerns,
+          body.captureSource
+        )
+      : await serverServices.submitScan(id, provider, body.concerns, body.captureSource);
     if (!result) {
       return Response.json(failure("SCAN_NOT_FOUND", "The scan was not found.", false), { status: 404 });
     }

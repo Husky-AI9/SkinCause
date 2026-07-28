@@ -78,6 +78,8 @@ describe("persistent scan service", () => {
     await expect(
       service.submitScan("owner-a", scan.id, new MockSkinAnalysisProvider())
     ).resolves.toMatchObject({ scanId: scan.id, status: "processing" });
+    expect(images.images.size).toBe(1);
+    await service.getScan("owner-a", scan.id, new MockSkinAnalysisProvider());
     expect(images.images.size).toBe(0);
     expect(repository.scans.get(scan.id)?.imagePath).toBeNull();
   });
@@ -144,8 +146,8 @@ describe("persistent scan service", () => {
       source: "mock",
       message: "deterministic test task created"
     });
-    expect(images.images.size).toBe(0);
-    expect(repository.scans.get(first.id)?.imagePath).toBeNull();
+    expect(images.images.size).toBe(1);
+    expect(repository.scans.get(first.id)?.imagePath).not.toBeNull();
 
     const completed = await service.getScan(
       "owner-a",
@@ -158,8 +160,10 @@ describe("persistent scan service", () => {
       result: { id: first.id, provider: "mock" }
     });
     expect(completed?.activity?.map((event) => event.message)).toContain(
-      "3 scores and 0 masks persisted"
+      "7 scores and 0 masks persisted"
     );
+    expect(images.images.size).toBe(0);
+    expect(repository.scans.get(first.id)?.imagePath).toBeNull();
     expect(repository.concerns.get(first.id)?.length).toBeGreaterThan(0);
   });
 

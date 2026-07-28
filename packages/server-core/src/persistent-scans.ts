@@ -1,12 +1,19 @@
 import type { Concern, Scan, ScanActivityEvent } from "@skincause/contracts";
 import type { SkinAnalysisProvider } from "./index";
 import { scanActivity } from "./scan-activity";
+import {
+  ROUTINE_SD_PROFILE_VERSION,
+  resolveRoutineSdActions
+} from "./skin-analysis-profile";
+import { safeProviderFailure } from "./provider-errors";
 
 export type StoredScan = {
   id: string;
   ownerId: string;
   status: Scan["status"];
   provider: "mock" | "youcam";
+  providerVersion: string | null;
+  analysisProfileVersion: string;
   externalTaskId: string | null;
   capturedAt: string;
   imagePath: string | null;
@@ -15,7 +22,10 @@ export type StoredScan = {
 };
 
 export type StoredScanPatch = Partial<
-  Pick<StoredScan, "status" | "externalTaskId" | "capturedAt" | "imagePath" | "retainImage">
+  Pick<
+    StoredScan,
+    "status" | "providerVersion" | "analysisProfileVersion" | "externalTaskId" | "capturedAt" | "imagePath" | "retainImage"
+  >
 >;
 
 export interface ScanRepository {
@@ -78,6 +88,8 @@ export class PersistentScanService {
       ownerId,
       status: "pending_upload",
       provider: input.provider,
+      providerVersion: null,
+      analysisProfileVersion: ROUTINE_SD_PROFILE_VERSION,
       externalTaskId: null,
       capturedAt: new Date().toISOString(),
       imagePath: `${ownerId}/${scanId}/${input.byteSize}.${extension}`,
@@ -108,7 +120,8 @@ export class PersistentScanService {
     ownerId: string,
     scanId: string,
     provider: SkinAnalysisProvider,
-    requestedConcerns = ["redness", "texture", "pore"]
+    requestedConcerns?: string[],
+    captureSource: "upload" | "camera-kit" = "upload"
   ): Promise<PersistentScanStatus | null> {
     let scan = await this.repository.findById(ownerId, scanId);
     if (!scan) return null;
@@ -174,33 +187,32 @@ export class PersistentScanService {
       const created = await provider.createAnalysis({
         image,
         mimeType: metadata.mimeType,
-        requestedConcerns,
-        idempotencyKey: scan.clientRequestId
+        requestedConcerns: resolveRoutineSdActions(requestedConcerns),
+        idempotencyKey: scan.clientRequestId,
+        captureSource
       });
       scan = await this.repository.update(ownerId, scanId, {
         status: "processing",
         externalTaskId: created.externalTaskId
       });
-      if (!scan.retainImage && scan.imagePath) {
-        await this.images.remove(scan.imagePath);
-        scan = await this.repository.update(ownerId, scanId, { imagePath: null });
-      }
       return {
         scanId,
         status: scan.status,
         pollAfterMs: 1500,
         activity: created.activity
       };
-    } catch {
+    } catch (error) {
       await this.repository.update(ownerId, scanId, { status: "provider_failed" });
+      const providerMessage = error instanceof Error ? error.message : "";
+      const providerCode =
+        providerMessage.startsWith("PROVIDER_") || providerMessage.startsWith("IMAGE_")
+          ? providerMessage
+          : "PROVIDER_NETWORK_ERROR";
+      const failure = safeProviderFailure(providerCode);
       return {
         scanId,
         status: "provider_failed",
-        error: {
-          code: "PROVIDER_ERROR",
-          message: "Analysis is temporarily unavailable.",
-          retryable: true
-        }
+        error: failure
       };
     }
   }
@@ -220,13 +232,24 @@ export class PersistentScanService {
           await this.repository.replaceConcerns(ownerId, scanId, analysis.result.concerns);
           scan = await this.repository.update(ownerId, scanId, {
             status: "normalized",
-            capturedAt: analysis.result.capturedAt
+            capturedAt: analysis.result.capturedAt,
+            providerVersion: analysis.result.providerVersion ?? null,
+            analysisProfileVersion:
+              analysis.result.analysisProfileVersion ?? ROUTINE_SD_PROFILE_VERSION
           });
+          const completionActivity = [...analysis.activity];
+          if (!scan.retainImage && scan.imagePath) {
+            await this.images.remove(scan.imagePath);
+            scan = await this.repository.update(ownerId, scanId, { imagePath: null });
+            completionActivity.push(
+              scanActivity("storage", "original image deleted after normalized results were stored", "success")
+            );
+          }
           return {
             scanId,
             status: scan.status,
             activity: [
-              ...analysis.activity,
+              ...completionActivity,
               scanActivity(
                 "skincause",
                 `${analysis.result.concerns.length} scores and ${analysis.result.concerns.filter((concern) => concern.maskUrl).length} masks persisted`,
@@ -281,8 +304,10 @@ export class PersistentScanService {
           id: scan.id,
           status: scan.status,
           capturedAt: scan.capturedAt,
-          provider: scan.provider,
-          concerns,
+            provider: scan.provider,
+            providerVersion: scan.providerVersion ?? undefined,
+            analysisProfileVersion: scan.analysisProfileVersion,
+            concerns,
           captureWarnings: []
         }
       };

@@ -1129,6 +1129,37 @@ h3 {
   gap: 24px;
 }
 
+.planner-stack {
+  display: grid;
+  min-width: 0;
+  gap: 20px;
+}
+
+.planner-submit {
+  display: flex;
+  margin-top: 22px;
+  padding-top: 20px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.planner-submit .form-error {
+  margin: 0;
+}
+
+.planner-submit .button {
+  margin-left: auto;
+}
+
+.ai-applied-note {
+  display: block;
+  margin-top: 8px;
+  color: var(--teal-dark);
+  font-weight: 700;
+}
+
 .panel {
   padding: 25px;
   border: 1px solid var(--line);
@@ -1661,6 +1692,7 @@ h3 {
   display: grid;
   width: min(250px, 70vw);
   height: 330px;
+  margin-inline: auto;
   place-items: center;
   border: 2px solid rgba(15, 118, 110, 0.7);
   border-radius: 48% 48% 45% 45%;
@@ -1929,6 +1961,136 @@ h3 {
   pointer-events: none;
 }
 
+.camera-kit-panel {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.camera-kit-panel #YMK-module:not(:empty) {
+  min-height: 320px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+}
+
+.camera-kit-panel small {
+  color: var(--muted);
+}
+
+.experiment-ai-panel {
+  margin-top: 20px;
+}
+
+.experiment-ai-panel--embedded {
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+}
+
+.experiment-ai-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.ai-tool-card {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--paper) 88%, var(--canvas));
+}
+
+.ai-tool-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.ai-tool-heading h3 {
+  margin: 8px 0 0;
+}
+
+.candidate-product {
+  display: grid;
+  gap: 3px;
+  padding: 14px;
+  border-radius: 14px;
+  background: var(--canvas);
+}
+
+.candidate-product small,
+.recommendation-sources small {
+  color: var(--ink-soft);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.candidate-product a,
+.recommendation-sources a {
+  color: var(--teal-dark);
+  font-weight: 700;
+}
+
+.recommendation-sources {
+  display: grid;
+  gap: 6px;
+}
+
+.compact-list {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.callout.compact {
+  margin: 0;
+  padding: 12px;
+}
+
+.simulation-result {
+  position: relative;
+  overflow: hidden;
+  border-radius: 16px;
+  background: var(--canvas);
+}
+
+.simulation-result img {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1;
+  object-fit: cover;
+}
+
+.simulation-label {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  padding: 6px 9px;
+  border-radius: 999px;
+  color: var(--white);
+  background: rgb(12 42 45 / 82%);
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.simulation-loading {
+  display: grid;
+  min-height: 220px;
+  place-content: center;
+  justify-items: center;
+  gap: 10px;
+  border-radius: 16px;
+  background: var(--canvas);
+  text-align: center;
+}
+
 .quality-box {
   padding: 16px;
   border-left: 3px solid var(--teal);
@@ -2083,6 +2245,10 @@ h3 {
 }
 
 @media (max-width: 920px) {
+  .experiment-ai-grid {
+    grid-template-columns: 1fr;
+  }
+
   .landing-hero-grid {
     width: min(100% - 40px, 820px);
     padding-block: 36px 52px;

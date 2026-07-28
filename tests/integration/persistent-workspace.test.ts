@@ -11,6 +11,7 @@ import {
   WorkspaceRuleError,
   type WorkspaceRepository
 } from "@skincause/server-core";
+import { scans } from "@skincause/domain";
 import { describe, expect, it } from "vitest";
 
 const product: Product = {
@@ -70,6 +71,10 @@ class MemoryWorkspaceRepository implements WorkspaceRepository {
     return this.normalizedScans.has(scanId);
   }
 
+  async getNormalizedScan(_ownerId: string, scanId: string) {
+    return this.normalizedScans.has(scanId) ? { ...scans[0], id: scanId } : null;
+  }
+
   async createExperiment(_ownerId: string, input: CreateExperiment) {
     const created: Experiment = {
       id: crypto.randomUUID(),
@@ -81,6 +86,9 @@ class MemoryWorkspaceRepository implements WorkspaceRepository {
       suspectProductId: input.suspectProductId,
       suspectProductName: product.name,
       hypothesis: input.hypothesis,
+      baselineScanId: input.baselineScanId,
+      analysisProfileVersion: input.analysisProfileVersion,
+      primaryConcerns: input.primaryConcerns,
       checkIns: []
     };
     this.experiments.push(created);
@@ -107,17 +115,21 @@ describe("persistent workspace service", () => {
   it("requires a baseline and only permits one active experiment", async () => {
     const repository = new MemoryWorkspaceRepository();
     const service = new PersistentWorkspaceService(repository);
+    const baselineScanId = crypto.randomUUID();
     const input: CreateExperiment = {
       type: "elimination",
       suspectProductId: product.id,
       startedAt: "2026-07-24T08:00:00.000Z",
-      hypothesis: "Observe whether the selected cosmetic concern changes."
+      hypothesis: "Observe whether the selected cosmetic concern changes.",
+      baselineScanId,
+      analysisProfileVersion: "routine-sd-v1",
+      primaryConcerns: ["redness"]
     };
 
     await expect(service.createExperiment("owner-a", input)).rejects.toMatchObject({
       code: "BASELINE_REQUIRED"
     });
-    repository.normalizedScans.add(crypto.randomUUID());
+    repository.normalizedScans.add(baselineScanId);
     await expect(service.createExperiment("owner-a", input)).resolves.toMatchObject({
       status: "active",
       suspectProductId: product.id
@@ -136,7 +148,10 @@ describe("persistent workspace service", () => {
       type: "elimination",
       suspectProductId: product.id,
       startedAt: "2026-07-24T08:00:00.000Z",
-      hypothesis: "Observe whether the selected cosmetic concern changes."
+      hypothesis: "Observe whether the selected cosmetic concern changes.",
+      baselineScanId: scanId,
+      analysisProfileVersion: "routine-sd-v1",
+      primaryConcerns: ["redness"]
     });
 
     await expect(service.createCheckIn("owner-a", experiment.id, {

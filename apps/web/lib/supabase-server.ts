@@ -1,10 +1,23 @@
 import {
+  MockRoutineRecommendationProvider,
+  MockSkinSimulationProvider,
+  OpenAiRoutineRecommendationProvider,
   PersistentScanService,
+  PersistentRoutineRecommendationService,
+  PersistentSkinSimulationService,
   PersistentWorkspaceService,
+  YouCamSkinSimulationProvider,
   type ScanImageStore,
   type ScanRepository,
+  type SkinSimulationImageStore,
+  type SkinSimulationRepository,
   type StoredScan,
   type StoredScanPatch,
+  type StoredRoutineRecommendation,
+  type StoredSkinSimulation,
+  type StoredSkinSimulationPatch,
+  type RoutineRecommendationRepository,
+  WorkspaceRuleError,
   type WorkspaceRepository
 } from "@skincause/server-core";
 import type {
@@ -16,13 +29,23 @@ import type {
   Product,
   ProductUpdate
 } from "@skincause/contracts";
+import {
+  routineRecommendationSchema,
+  skinSimulationParametersSchema
+} from "@skincause/contracts";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import {
+  calculateLongitudinalAssociation,
+  calculateSkinSimulationParameters
+} from "@skincause/domain";
 
 type ScanRow = {
   id: string;
   user_id: string;
   status: StoredScan["status"];
   provider: StoredScan["provider"];
+  provider_version: string | null;
+  analysis_profile_version: string;
   external_task_id: string | null;
   captured_at: string | null;
   image_path: string | null;
@@ -35,8 +58,11 @@ type ConcernRow = {
   scan_id: string;
   concern_key: string;
   raw_score: number | string | null;
+  ui_score: number | string | null;
   normalized_severity: number | string | null;
   direction_source: Concern["directionSource"];
+  display_label: string | null;
+  experiment_role: Concern["experimentRole"] | null;
 };
 
 type RoutinePeriodRow = {
@@ -69,6 +95,9 @@ type ExperimentRow = {
   started_at: string;
   ended_at: string | null;
   hypothesis: string;
+  baseline_scan_id: string | null;
+  analysis_profile_version: string;
+  primary_concerns: string[];
 };
 
 type CheckInRow = {
@@ -82,6 +111,35 @@ type CheckInRow = {
   } | null;
   notes: string | null;
   occurred_at: string;
+};
+
+type RecommendationRow = {
+  experiment_id: string;
+  user_id: string;
+  input_hash: string;
+  model: string;
+  recommendation: unknown;
+  created_at: string;
+  updated_at: string;
+};
+
+type SkinSimulationRow = {
+  experiment_id: string;
+  user_id: string;
+  source_scan_id: string | null;
+  target_scan_id: string | null;
+  status: StoredSkinSimulation["status"];
+  provider: StoredSkinSimulation["provider"];
+  provider_version: string;
+  external_task_id: string | null;
+  input_hash: string;
+  parameters: unknown;
+  result_path: string | null;
+  result_mime_type: StoredSkinSimulation["resultMimeType"];
+  error_code: string | null;
+  expires_at: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
 export type RequestActor =
@@ -135,6 +193,8 @@ function toStoredScan(row: ScanRow): StoredScan {
     ownerId: row.user_id,
     status: row.status,
     provider: row.provider,
+    providerVersion: row.provider_version,
+    analysisProfileVersion: row.analysis_profile_version,
     externalTaskId: row.external_task_id,
     capturedAt: row.captured_at ?? row.created_at,
     imagePath: row.image_path,
@@ -222,6 +282,8 @@ export class SupabaseScanRepository implements ScanRepository {
         user_id: scan.ownerId,
         status: scan.status,
         provider: scan.provider,
+        provider_version: scan.providerVersion,
+        analysis_profile_version: scan.analysisProfileVersion,
         external_task_id: scan.externalTaskId,
         captured_at: scan.capturedAt,
         image_path: scan.imagePath,
@@ -237,6 +299,10 @@ export class SupabaseScanRepository implements ScanRepository {
   async update(ownerId: string, scanId: string, patch: StoredScanPatch) {
     const databasePatch: Record<string, unknown> = {};
     if (patch.status !== undefined) databasePatch.status = patch.status;
+    if (patch.providerVersion !== undefined) databasePatch.provider_version = patch.providerVersion;
+    if (patch.analysisProfileVersion !== undefined) {
+      databasePatch.analysis_profile_version = patch.analysisProfileVersion;
+    }
     if (patch.externalTaskId !== undefined) databasePatch.external_task_id = patch.externalTaskId;
     if (patch.capturedAt !== undefined) databasePatch.captured_at = patch.capturedAt;
     if (patch.imagePath !== undefined) databasePatch.image_path = patch.imagePath;
@@ -265,9 +331,12 @@ export class SupabaseScanRepository implements ScanRepository {
     return ((data ?? []) as ConcernRow[]).map((row) => ({
       key: row.concern_key,
       providerLabel: labelForConcern(row.concern_key),
+      displayLabel: row.display_label ?? labelForConcern(row.concern_key),
       rawScore: row.raw_score === null ? null : Number(row.raw_score),
+      uiScore: row.ui_score === null ? null : Number(row.ui_score),
       normalizedSeverity: row.normalized_severity === null ? null : Number(row.normalized_severity),
-      directionSource: row.direction_source
+      directionSource: row.direction_source,
+      ...(row.experiment_role ? { experimentRole: row.experiment_role } : {})
     }));
   }
 
@@ -282,8 +351,11 @@ export class SupabaseScanRepository implements ScanRepository {
         scan_id: scanId,
         concern_key: concern.key,
         raw_score: concern.rawScore,
+        ui_score: concern.uiScore ?? null,
         normalized_severity: concern.normalizedSeverity,
-        direction_source: concern.directionSource
+        direction_source: concern.directionSource,
+        display_label: concern.displayLabel ?? concern.providerLabel,
+        experiment_role: concern.experimentRole ?? null
       }))
     );
     if (inserted.error) throw inserted.error;
@@ -468,6 +540,30 @@ export class SupabaseWorkspaceRepository implements WorkspaceRepository {
     return (count ?? 0) > 0;
   }
 
+  async getNormalizedScan(ownerId: string, scanId: string) {
+    const { data, error } = await this.client
+      .from("scans")
+      .select("*")
+      .eq("user_id", ownerId)
+      .eq("id", scanId)
+      .in("status", ["normalized", "succeeded"])
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) return null;
+    const row = data as ScanRow;
+    const concerns = await new SupabaseScanRepository(this.client).listConcerns(ownerId, scanId);
+    return {
+      id: row.id,
+      status: row.status,
+      capturedAt: row.captured_at ?? row.created_at,
+      provider: row.provider,
+      providerVersion: row.provider_version ?? undefined,
+      analysisProfileVersion: row.analysis_profile_version,
+      concerns,
+      captureWarnings: []
+    };
+  }
+
   async createExperiment(ownerId: string, input: CreateExperiment) {
     const id = crypto.randomUUID();
     const { data, error } = await this.client
@@ -479,7 +575,10 @@ export class SupabaseWorkspaceRepository implements WorkspaceRepository {
         suspect_product_id: input.suspectProductId,
         status: "active",
         started_at: input.startedAt,
-        hypothesis: input.hypothesis
+        hypothesis: input.hypothesis,
+        baseline_scan_id: input.baselineScanId,
+        analysis_profile_version: input.analysisProfileVersion,
+        primary_concerns: input.primaryConcerns
       })
       .select("*")
       .single();
@@ -526,6 +625,24 @@ export class SupabaseWorkspaceRepository implements WorkspaceRepository {
     if (checkInsResult.error) throw checkInsResult.error;
     const suspectProductName =
       typeof productResult.data?.name === "string" ? productResult.data.name : "Selected product";
+    const checkIns = ((checkInsResult.data ?? []) as CheckInRow[]).map(mapCheckIn);
+    const baseline = row.baseline_scan_id
+      ? await this.getNormalizedScan(ownerId, row.baseline_scan_id)
+      : null;
+    const followUps = (await Promise.all(
+      checkIns.flatMap((checkIn) =>
+        checkIn.scanId ? [this.getNormalizedScan(ownerId, checkIn.scanId)] : []
+      )
+    )).filter((scan): scan is NonNullable<typeof scan> => scan !== null);
+    const result = baseline
+      ? calculateLongitudinalAssociation({
+          experimentType: row.type,
+          baseline,
+          followUps,
+          checkIns,
+          primaryConcerns: row.primary_concerns
+        })
+      : undefined;
     return {
       id: row.id,
       name: `${suspectProductName} ${row.type}`,
@@ -536,8 +653,183 @@ export class SupabaseWorkspaceRepository implements WorkspaceRepository {
       suspectProductId: row.suspect_product_id,
       suspectProductName,
       hypothesis: row.hypothesis,
-      checkIns: ((checkInsResult.data ?? []) as CheckInRow[]).map(mapCheckIn)
+      baselineScanId: row.baseline_scan_id,
+      analysisProfileVersion: row.analysis_profile_version,
+      primaryConcerns: row.primary_concerns,
+      ...(result ? { result } : {}),
+      checkIns
     };
+  }
+}
+
+export class SupabaseRoutineRecommendationRepository
+implements RoutineRecommendationRepository {
+  constructor(private readonly client: SupabaseClient) {}
+
+  async find(ownerId: string, experimentId: string) {
+    const { data, error } = await this.client
+      .from("experiment_recommendations")
+      .select("*")
+      .eq("user_id", ownerId)
+      .eq("experiment_id", experimentId)
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) return null;
+    const row = data as RecommendationRow;
+    const recommendation = routineRecommendationSchema.parse(row.recommendation);
+    return {
+      ownerId: row.user_id,
+      experimentId: row.experiment_id,
+      inputHash: row.input_hash,
+      recommendation
+    };
+  }
+
+  async upsert(record: StoredRoutineRecommendation) {
+    const { data, error } = await this.client
+      .from("experiment_recommendations")
+      .upsert({
+        experiment_id: record.experimentId,
+        user_id: record.ownerId,
+        input_hash: record.inputHash,
+        model: record.recommendation.model,
+        recommendation: record.recommendation,
+        created_at: record.recommendation.generatedAt,
+        updated_at: record.recommendation.generatedAt
+      }, { onConflict: "experiment_id" })
+      .select("*")
+      .single();
+    if (error) throw error;
+    const row = data as RecommendationRow;
+    return {
+      ownerId: row.user_id,
+      experimentId: row.experiment_id,
+      inputHash: row.input_hash,
+      recommendation: routineRecommendationSchema.parse(row.recommendation)
+    };
+  }
+}
+
+function mapSkinSimulation(row: SkinSimulationRow): StoredSkinSimulation {
+  if (!row.source_scan_id || !row.target_scan_id) {
+    throw new Error("SIMULATION_SCAN_REFERENCE_MISSING");
+  }
+  return {
+    ownerId: row.user_id,
+    experimentId: row.experiment_id,
+    sourceScanId: row.source_scan_id,
+    targetScanId: row.target_scan_id,
+    status: row.status,
+    provider: row.provider,
+    providerVersion: row.provider_version,
+    externalTaskId: row.external_task_id,
+    inputHash: row.input_hash,
+    parameters: skinSimulationParametersSchema.parse(row.parameters),
+    resultPath: row.result_path,
+    resultMimeType: row.result_mime_type,
+    errorCode: row.error_code,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    expiresAt: row.expires_at
+  };
+}
+
+export class SupabaseSkinSimulationRepository implements SkinSimulationRepository {
+  constructor(private readonly client: SupabaseClient) {}
+
+  async find(ownerId: string, experimentId: string) {
+    const { data, error } = await this.client
+      .from("skin_simulations")
+      .select("*")
+      .eq("user_id", ownerId)
+      .eq("experiment_id", experimentId)
+      .maybeSingle();
+    if (error) throw error;
+    return data ? mapSkinSimulation(data as SkinSimulationRow) : null;
+  }
+
+  async upsert(record: StoredSkinSimulation) {
+    const { data, error } = await this.client
+      .from("skin_simulations")
+      .upsert({
+        experiment_id: record.experimentId,
+        user_id: record.ownerId,
+        source_scan_id: record.sourceScanId,
+        target_scan_id: record.targetScanId,
+        status: record.status,
+        provider: record.provider,
+        provider_version: record.providerVersion,
+        external_task_id: record.externalTaskId,
+        input_hash: record.inputHash,
+        parameters: record.parameters,
+        result_path: record.resultPath,
+        result_mime_type: record.resultMimeType,
+        error_code: record.errorCode,
+        expires_at: record.expiresAt,
+        created_at: record.createdAt,
+        updated_at: record.updatedAt
+      }, { onConflict: "experiment_id" })
+      .select("*")
+      .single();
+    if (error) throw error;
+    return mapSkinSimulation(data as SkinSimulationRow);
+  }
+
+  async update(
+    ownerId: string,
+    experimentId: string,
+    patch: StoredSkinSimulationPatch
+  ) {
+    const databasePatch: Record<string, unknown> = {};
+    if (patch.status !== undefined) databasePatch.status = patch.status;
+    if (patch.externalTaskId !== undefined) databasePatch.external_task_id = patch.externalTaskId;
+    if (patch.resultPath !== undefined) databasePatch.result_path = patch.resultPath;
+    if (patch.resultMimeType !== undefined) {
+      databasePatch.result_mime_type = patch.resultMimeType;
+    }
+    if (patch.errorCode !== undefined) databasePatch.error_code = patch.errorCode;
+    if (patch.updatedAt !== undefined) databasePatch.updated_at = patch.updatedAt;
+    if (patch.expiresAt !== undefined) databasePatch.expires_at = patch.expiresAt;
+    const { data, error } = await this.client
+      .from("skin_simulations")
+      .update(databasePatch)
+      .eq("user_id", ownerId)
+      .eq("experiment_id", experimentId)
+      .select("*")
+      .single();
+    if (error) throw error;
+    return mapSkinSimulation(data as SkinSimulationRow);
+  }
+}
+
+export class SupabaseSkinSimulationImageStore implements SkinSimulationImageStore {
+  private readonly client = adminClient();
+  private readonly bucket = "simulation-images";
+
+  async put(
+    path: string,
+    image: Uint8Array,
+    mimeType: "image/jpeg" | "image/png"
+  ) {
+    const { error } = await this.client.storage.from(this.bucket).upload(path, image, {
+      contentType: mimeType,
+      upsert: true
+    });
+    if (error) throw error;
+  }
+
+  async get(path: string) {
+    const { data, error } = await this.client.storage.from(this.bucket).download(path);
+    if (error) {
+      if (error.message.toLowerCase().includes("not found")) return null;
+      throw error;
+    }
+    return new Uint8Array(await data.arrayBuffer());
+  }
+
+  async remove(path: string) {
+    const { error } = await this.client.storage.from(this.bucket).remove([path]);
+    if (error) throw error;
   }
 }
 
@@ -597,10 +889,123 @@ export function createPersistentWorkspaceService(actor: Extract<RequestActor, { 
   return new PersistentWorkspaceService(new SupabaseWorkspaceRepository(actor.client));
 }
 
+export function createPersistentRoutineRecommendationService(
+  actor: Extract<RequestActor, { kind: "authenticated" }>
+) {
+  const provider = process.env.OPENAI_MOCK_MODE !== "false"
+    ? new MockRoutineRecommendationProvider()
+    : new OpenAiRoutineRecommendationProvider(
+        process.env.OPENAI_API_KEY ?? "",
+        process.env.OPENAI_RECOMMENDATION_MODEL ?? "gpt-5.6-sol",
+        process.env.OPENAI_API_BASE_URL
+      );
+  return new PersistentRoutineRecommendationService(
+    new SupabaseRoutineRecommendationRepository(actor.client),
+    provider
+  );
+}
+
+export function createPersistentSkinSimulationService(
+  actor: Extract<RequestActor, { kind: "authenticated" }>,
+  mockResultUrl: string
+) {
+  const provider = process.env.YOUCAM_MOCK_MODE !== "false"
+    ? new MockSkinSimulationProvider(mockResultUrl)
+    : new YouCamSkinSimulationProvider(
+        process.env.YOUCAM_API_KEY ?? "",
+        process.env.YOUCAM_SIMULATION_API_URL
+      );
+  return new PersistentSkinSimulationService(
+    new SupabaseSkinSimulationRepository(actor.client),
+    new SupabaseSkinSimulationImageStore(),
+    provider
+  );
+}
+
+export async function getExperimentSimulationContext(
+  actor: Extract<RequestActor, { kind: "authenticated" }>,
+  experiment: Experiment
+) {
+  if (!experiment.baselineScanId) {
+    throw new WorkspaceRuleError(
+      "SIMULATION_BASELINE_REQUIRED",
+      "A baseline scan is required before generating an illustration.",
+      409
+    );
+  }
+  const targetScanId = [...experiment.checkIns]
+    .reverse()
+    .find((checkIn) => checkIn.scanId)?.scanId;
+  if (!targetScanId) {
+    throw new WorkspaceRuleError(
+      "SIMULATION_FOLLOW_UP_REQUIRED",
+      "Add a comparable follow-up scan before generating the after-experiment illustration.",
+      409
+    );
+  }
+  const scanRepository = new SupabaseScanRepository(actor.client);
+  const sourceScan = await scanRepository.findById(actor.userId, experiment.baselineScanId);
+  if (!sourceScan?.imagePath || !sourceScan.retainImage) {
+    throw new WorkspaceRuleError(
+      "SIMULATION_SOURCE_IMAGE_UNAVAILABLE",
+      "The baseline original was deleted. A retained baseline image is required for simulation.",
+      409
+    );
+  }
+  const workspaceRepository = new SupabaseWorkspaceRepository(actor.client);
+  const [baselineScan, targetScan] = await Promise.all([
+    workspaceRepository.getNormalizedScan(actor.userId, experiment.baselineScanId),
+    workspaceRepository.getNormalizedScan(actor.userId, targetScanId)
+  ]);
+  if (!baselineScan || !targetScan) {
+    throw new WorkspaceRuleError(
+      "SIMULATION_FOLLOW_UP_UNAVAILABLE",
+      "Comparable baseline and follow-up measurements are required for simulation.",
+      409
+    );
+  }
+  const { data, error } = await adminClient()
+    .storage
+    .from("scan-images")
+    .createSignedUrl(sourceScan.imagePath, 10 * 60);
+  if (error) throw error;
+  const parameters = calculateSkinSimulationParameters(baselineScan, targetScan);
+  if (Object.values(parameters).every((value) => value === 0)) {
+    throw new WorkspaceRuleError(
+      "SIMULATION_NO_POSITIVE_CHANGE",
+      "The follow-up has no positive measured change that YouCam can illustrate.",
+      409
+    );
+  }
+  return {
+    experimentId: experiment.id,
+    sourceScanId: sourceScan.id,
+    targetScanId,
+    sourceImageUrl: data.signedUrl,
+    parameters
+  };
+}
+
 export async function deleteAuthenticatedAccount(
   actor: Extract<RequestActor, { kind: "authenticated" }>
 ) {
   const admin = adminClient();
+  const { data: simulations, error: simulationsError } = await admin
+    .from("skin_simulations")
+    .select("result_path")
+    .eq("user_id", actor.userId)
+    .not("result_path", "is", null);
+  if (simulationsError) throw simulationsError;
+  const simulationPaths = (simulations ?? []).flatMap((simulation) =>
+    typeof simulation.result_path === "string" ? [simulation.result_path] : []
+  );
+  if (simulationPaths.length > 0) {
+    const removedSimulations = await admin.storage
+      .from("simulation-images")
+      .remove(simulationPaths);
+    if (removedSimulations.error) throw removedSimulations.error;
+  }
+
   const { data: scans, error: scansError } = await admin
     .from("scans")
     .select("image_path")

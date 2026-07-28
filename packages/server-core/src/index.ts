@@ -1,6 +1,21 @@
 import type { Product, Scan, ScanActivityEvent } from "@skincause/contracts";
 import { products, scans, seededExperiment } from "@skincause/domain";
 import { scanActivity } from "./scan-activity";
+import {
+  ROUTINE_SD_PROFILE_VERSION,
+  concernDefinitionForAction,
+  resolveRoutineSdActions
+} from "./skin-analysis-profile";
+import {
+  firstSafeMaskUrl,
+  youCamCreateTaskResponseSchema,
+  youCamFileResponseSchema,
+  youCamTaskStatusSchema
+} from "./youcam-schemas";
+import { validateSdImageDimensions } from "./image-dimensions";
+import { safeProviderFailure } from "./provider-errors";
+
+export * from "./skin-analysis-profile";
 
 export interface SkinAnalysisProvider {
   readonly providerName: "mock" | "youcam";
@@ -9,6 +24,7 @@ export interface SkinAnalysisProvider {
     mimeType: "image/jpeg" | "image/png";
     requestedConcerns: string[];
     idempotencyKey: string;
+    captureSource?: "upload" | "camera-kit";
   }): Promise<{ externalTaskId: string; activity: ScanActivityEvent[] }>;
   getAnalysis(externalTaskId: string): Promise<
     | { status: "queued" | "processing"; activity: ScanActivityEvent[] }
@@ -26,6 +42,7 @@ export class MockSkinAnalysisProvider implements SkinAnalysisProvider {
     mimeType: "image/jpeg" | "image/png";
     requestedConcerns: string[];
     idempotencyKey: string;
+    captureSource?: "upload" | "camera-kit";
   }) {
     const existing = this.requests.get(input.idempotencyKey);
     if (existing) {
@@ -72,8 +89,11 @@ export class YouCamSkinAnalysisProvider implements SkinAnalysisProvider {
     mimeType: "image/jpeg" | "image/png";
     requestedConcerns: string[];
     idempotencyKey: string;
+    captureSource?: "upload" | "camera-kit";
   }) {
     if (!this.apiKey) throw new Error("YOUCAM_API_KEY is required when mock mode is disabled.");
+    const requestedConcerns = resolveRoutineSdActions(input.requestedConcerns);
+    validateSdImageDimensions(input.image, input.mimeType);
 
     const activity: ScanActivityEvent[] = [];
     const fileExtension = input.mimeType === "image/png" ? "png" : "jpg";
@@ -100,12 +120,10 @@ export class YouCamSkinAnalysisProvider implements SkinAnalysisProvider {
       `POST /s2s/${this.apiVersion}/file/skin-analysis -> ${fileResponse.status}; upload slot received`,
       "success"
     ));
-    const filePayload = (await fileResponse.json()) as {
-      data?: { files?: Array<{ file_id: string; requests?: Array<{ url: string; method?: string; headers?: Record<string, string> }> }> };
-    };
-    const file = filePayload.data?.files?.[0];
-    const upload = file?.requests?.[0];
-    if (!file?.file_id || !upload?.url) throw new Error("PROVIDER_FILE_SCHEMA_CHANGED");
+    const filePayload = youCamFileResponseSchema.safeParse(await fileResponse.json());
+    if (!filePayload.success) throw new Error("PROVIDER_FILE_SCHEMA_CHANGED");
+    const file = filePayload.data.data.files[0];
+    const upload = file.requests[0];
 
     const uploadResponse = await fetch(upload.url, {
       method: upload.method ?? "PUT",
@@ -128,11 +146,12 @@ export class YouCamSkinAnalysisProvider implements SkinAnalysisProvider {
       },
       body: JSON.stringify({
         src_file_id: file.file_id,
-        dst_actions: input.requestedConcerns,
+        dst_actions: requestedConcerns,
         miniserver_args: {
           enable_mask_overlay: true
         },
-        format: "json"
+        format: "json",
+        pf_camera_kit: input.captureSource === "camera-kit"
       })
     });
     if (!taskResponse.ok) throw new Error("PROVIDER_TASK_REQUEST_FAILED");
@@ -141,9 +160,9 @@ export class YouCamSkinAnalysisProvider implements SkinAnalysisProvider {
       `POST /s2s/${this.apiVersion}/task/skin-analysis -> ${taskResponse.status}; analysis task accepted`,
       "success"
     ));
-    const taskPayload = (await taskResponse.json()) as { data?: { task_id?: string } };
-    if (!taskPayload.data?.task_id) throw new Error("PROVIDER_TASK_SCHEMA_CHANGED");
-    return { externalTaskId: taskPayload.data.task_id, activity };
+    const taskPayload = youCamCreateTaskResponseSchema.safeParse(await taskResponse.json());
+    if (!taskPayload.success) throw new Error("PROVIDER_TASK_SCHEMA_CHANGED");
+    return { externalTaskId: taskPayload.data.data.task_id, activity };
   }
 
   async getAnalysis(externalTaskId: string) {
@@ -167,39 +186,34 @@ export class YouCamSkinAnalysisProvider implements SkinAnalysisProvider {
         activity
       };
     }
-    const payload = (await response.json()) as {
-      data?: {
-        task_status?: string;
-        error_code?: string;
-        error?: string;
-        results?: {
-          output?: Array<{
-            type?: string;
-            raw_score?: number;
-            ui_score?: number;
-            mask_urls?: unknown;
-          }>;
-        };
+    const parsedPayload = youCamTaskStatusSchema.safeParse(await response.json());
+    if (!parsedPayload.success) {
+      return {
+        status: "failed" as const,
+        code: "PROVIDER_SCHEMA_CHANGED",
+        message: "The provider response could not be normalized.",
+        retryable: false,
+        activity
       };
-    };
-    const taskStatus = payload.data?.task_status;
+    }
+    const payload = parsedPayload.data;
+    const taskStatus = payload.data.task_status;
     activity.push(scanActivity(
       "youcam",
       `provider status=${taskStatus ?? "unknown"}`,
       taskStatus === "error" ? "error" : taskStatus === "success" ? "success" : "info"
     ));
     if (taskStatus === "error") {
+      const failure = safeProviderFailure(payload.data.error_code ?? undefined);
       return {
         status: "failed" as const,
-        code: payload.data?.error_code ?? "PROVIDER_ERROR",
-        message: payload.data?.error ?? "The image could not be analyzed.",
-        retryable: false,
+        ...failure,
         activity
       };
     }
     if (taskStatus !== "success") return { status: "processing" as const, activity };
 
-    const output = payload.data?.results?.output;
+    const output = payload.data.results?.output;
     if (!Array.isArray(output)) {
       return {
         status: "failed" as const,
@@ -211,26 +225,20 @@ export class YouCamSkinAnalysisProvider implements SkinAnalysisProvider {
     }
 
     const concerns = output.flatMap((item) => {
-      if (!item.type) return [];
-      const key = item.type.replace(/^hd_/, "").replace(/^pore$/, "pores");
-      if (["all", "skin_age", "resize_image"].includes(key)) return [];
+      const definition = concernDefinitionForAction(item.type);
+      if (!definition) return [];
+      const rawScore = typeof item.raw_score === "number" ? item.raw_score : null;
       const uiScore = typeof item.ui_score === "number" ? item.ui_score : null;
-      const maskUrl = Array.isArray(item.mask_urls)
-        ? item.mask_urls.find((value): value is string => {
-            if (typeof value !== "string") return false;
-            try {
-              return new URL(value).protocol === "https:";
-            } catch {
-              return false;
-            }
-          })
-        : undefined;
+      const maskUrl = firstSafeMaskUrl(item.mask_urls);
       return [{
-        key,
-        providerLabel: key.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()),
-        rawScore: typeof item.raw_score === "number" ? item.raw_score : null,
-        normalizedSeverity: uiScore === null ? null : Math.max(0, Math.min(100, 100 - uiScore)),
+        key: definition.key,
+        providerLabel: definition.providerLabel,
+        displayLabel: definition.displayLabel,
+        rawScore,
+        uiScore,
+        normalizedSeverity: rawScore === null ? null : Math.max(0, Math.min(100, 100 - rawScore)),
         directionSource: "provider-doc" as const,
+        experimentRole: definition.experimentRole,
         ...(maskUrl ? { maskUrl } : {})
       }];
     });
@@ -254,6 +262,7 @@ export class YouCamSkinAnalysisProvider implements SkinAnalysisProvider {
         capturedAt: new Date().toISOString(),
         provider: "youcam" as const,
         providerVersion: this.apiVersion,
+        analysisProfileVersion: ROUTINE_SD_PROFILE_VERSION,
         concerns,
         captureWarnings: []
       },
@@ -344,7 +353,8 @@ export const serverServices = {
   async submitScan(
     scanId: string,
     provider: SkinAnalysisProvider,
-    requestedConcerns = ["redness", "texture", "pore"]
+    requestedConcerns?: string[],
+    captureSource: "upload" | "camera-kit" = "upload"
   ) {
     const session = state.scansById.get(scanId);
     if (!session) return null;
@@ -362,8 +372,9 @@ export const serverServices = {
         .createAnalysis({
           image: session.image!,
           mimeType: session.mimeType,
-          requestedConcerns,
-          idempotencyKey: session.clientRequestId
+          requestedConcerns: resolveRoutineSdActions(requestedConcerns),
+          idempotencyKey: session.clientRequestId,
+          captureSource
         })
         .then(({ externalTaskId, activity }) => {
           session.externalTaskId = externalTaskId;
@@ -374,16 +385,12 @@ export const serverServices = {
         .catch((error: unknown) => {
           session.status = "provider_failed";
           const providerMessage = error instanceof Error ? error.message : "";
-          const providerCode = providerMessage.startsWith("PROVIDER_")
-            ? providerMessage
-            : providerMessage.includes("YOUCAM_API_KEY")
-              ? "PROVIDER_CONFIG_MISSING"
+          const providerCode = providerMessage.includes("YOUCAM_API_KEY")
+            ? "PROVIDER_CONFIG_MISSING"
+            : providerMessage.startsWith("PROVIDER_") || providerMessage.startsWith("IMAGE_")
+              ? providerMessage
               : "PROVIDER_NETWORK_ERROR";
-          session.error = {
-            code: providerCode,
-            message: "Analysis is temporarily unavailable.",
-            retryable: true
-          };
+          session.error = safeProviderFailure(providerCode);
           session.submission = undefined;
         });
     }
@@ -444,4 +451,6 @@ export function failure(code: string, message: string, retryable = false, reques
 
 export * from "./persistent-scans";
 export * from "./persistent-workspace";
+export * from "./routine-recommendation";
 export * from "./scan-activity";
+export * from "./skin-simulation";

@@ -327,6 +327,162 @@
         }
       }
     },
+    "/experiments/{id}/recommendation": {
+      "get": {
+        "summary": "Get the latest AI routine suggestion",
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccess"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validated API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiFailure"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Generate one sourced add, remove, replace, keep, or no-change suggestion",
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccess"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validated API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiFailure"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/experiments/{id}/simulation": {
+      "get": {
+        "summary": "Get or poll the illustrative YouCam skin simulation",
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccess"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validated API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiFailure"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Start an illustrative YouCam skin simulation",
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccess"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validated API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiFailure"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete the generated simulation image",
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccess"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validated API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiFailure"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/experiments/{id}/simulation/image": {
+      "get": {
+        "summary": "Read the private short-lived generated image",
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccess"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validated API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiFailure"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/scans/upload-sessions": {
       "post": {
         "summary": "Create a resumable upload session",

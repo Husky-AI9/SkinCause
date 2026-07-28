@@ -16,6 +16,11 @@ export default defineConfig({
   webServer: {
     command: "npm run dev",
     url: "http://localhost:3000",
+    env: {
+      ...process.env,
+      YOUCAM_MOCK_MODE: process.env.LIVE_YOUCAM_E2E === "true" ? "false" : "true",
+      OPENAI_MOCK_MODE: process.env.LIVE_OPENAI_E2E === "true" ? "false" : "true"
+    },
     reuseExistingServer: true,
     timeout: 120_000
   }

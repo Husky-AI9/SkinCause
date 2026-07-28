@@ -3,9 +3,11 @@ import {
   createCheckInSchema,
   createExperimentSchema,
   productSchema,
+  routineRecommendationSchema,
   scanActivityEventSchema,
   scanSchema,
-  scanUploadSessionSchema
+  scanUploadSessionSchema,
+  skinSimulationSchema
 } from "@skincause/contracts";
 import { products } from "@skincause/domain";
 import { describe, expect, it } from "vitest";
@@ -25,7 +27,10 @@ describe("portable API contracts", () => {
       type: "elimination",
       suspectProductId: "product-id",
       startedAt: "2026-07-24T08:00:00.000Z",
-      hypothesis: "Observe whether the cosmetic concern changes during the experiment."
+      hypothesis: "Observe whether the cosmetic concern changes during the experiment.",
+      baselineScanId: "baseline-scan-id",
+      analysisProfileVersion: "routine-sd-v1",
+      primaryConcerns: ["redness", "texture"]
     }).success).toBe(true);
     expect(createCheckInSchema.safeParse({
       adherence: 100,
@@ -85,13 +90,17 @@ describe("portable API contracts", () => {
       capturedAt: "2026-07-25T18:00:00.000Z",
       provider: "youcam",
       providerVersion: "v2.1",
+      analysisProfileVersion: "routine-sd-v1",
       captureWarnings: [],
       concerns: [{
         key: "redness",
         providerLabel: "Redness",
+        displayLabel: "Visible redness pattern",
         rawScore: 76.5,
-        normalizedSeverity: 24,
+        uiScore: 80,
+        normalizedSeverity: 23.5,
         directionSource: "provider-doc",
+        experimentRole: "primary",
         maskUrl: "https://results.example.test/redness.jpg"
       }]
     };
@@ -104,5 +113,40 @@ describe("portable API contracts", () => {
       ...scan,
       concerns: [{ ...scan.concerns[0], maskUrl: "javascript:alert(1)" }]
     }).success).toBe(false);
+  });
+
+  it("validates sourced product replacements and private simulation status", () => {
+    expect(routineRecommendationSchema.safeParse({
+      experimentId: "experiment-id",
+      model: "gpt-5.6-sol",
+      generatedAt: "2026-07-27T20:00:00.000Z",
+      action: "replace",
+      existingProductId: "product-id",
+      existingProductName: "Current serum",
+      candidateProduct: {
+        name: "Candidate moisturizer",
+        brand: "Example brand",
+        category: "Moisturizer",
+        productUrl: "https://example.test/product"
+      },
+      summary: "Test one replacement while keeping the rest of the routine stable.",
+      rationale: ["The experiment showed a repeated visible pattern."],
+      evidence: ["Moderate deterministic association."],
+      measurementKeys: ["redness", "texture"],
+      sources: [{ title: "Product page", url: "https://example.test/product" }],
+      uncertainty: "This is a hypothesis to test, not proof of suitability.",
+      disclaimer: "Not medical advice."
+    }).success).toBe(true);
+    expect(skinSimulationSchema.safeParse({
+      experimentId: "experiment-id",
+      status: "processing",
+      provider: "youcam",
+      sourceScanId: "baseline-id",
+      targetScanId: "follow-up-id",
+      expiresAt: null,
+      generatedAt: null,
+      pollAfterMs: 2000,
+      disclaimer: "Illustrative only."
+    }).success).toBe(true);
   });
 });

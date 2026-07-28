@@ -57,3 +57,29 @@ test("authentication screen exposes sign-in and account creation states", async 
   await expect(page.getByRole("heading", { name: "Create your account" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Create account" })).toBeEnabled();
 });
+
+test("experiment studio suggests a replacement and generates an illustration", async ({ page }) => {
+  await page.goto("/experiments/new?from=brightening-serum-elimination");
+  await expect(
+    page.getByRole("heading", { name: "Use prior evidence to plan this one change" })
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: "AI routine suggestion" }).click();
+  await expect(page.getByText("Replace one product", { exact: true })).toBeVisible();
+  await expect(page.getByText("Suggested candidate", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("Demo catalog Fragrance-free barrier moisturizer", { exact: true })
+  ).toBeVisible();
+  await expect(page.getByLabel("Suspect product")).toHaveValue("__ai_candidate_product__");
+  await expect(page.getByRole("button", { name: "Add / replace product" })).toHaveClass(/is-active/);
+  await expect(page.getByLabel("Redness")).toBeChecked();
+  await expect(page.getByLabel("Texture")).toBeChecked();
+
+  await page.getByRole("button", { name: "Generate illustration" }).click();
+  await expect(
+    page.getByRole("img", {
+      name: "AI-generated illustrative skin appearance based on recorded cosmetic measurements"
+    })
+  ).toBeVisible();
+  await expect(page.getByText("AI-generated illustration", { exact: true })).toBeVisible();
+});

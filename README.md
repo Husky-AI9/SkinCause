@@ -58,16 +58,22 @@ NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_...
 NEXT_PUBLIC_SUPABASE_ANONYMOUS_ENABLED=true
 NEXT_PUBLIC_YOUCAM_CAMERA_KIT_ENABLED=false
+NEXT_PUBLIC_YOUCAM_CAMERA_KIT_SCRIPT_URL=
 SUPABASE_SERVICE_ROLE_KEY=sb_secret_...
 YOUCAM_API_KEY=...
 YOUCAM_API_BASE_URL=https://yce-api-01.makeupar.com
 YOUCAM_API_VERSION=v2.1
+YOUCAM_SIMULATION_API_URL=https://yce-api-01.makeupar.com/s2s/v2.0/task/skin-simulation
 YOUCAM_MOCK_MODE=false
 YOUCAM_POLL_TIMEOUT_MS=90000
 YOUCAM_MAX_IMAGE_BYTES=10000000
+OPENAI_API_KEY=...
+OPENAI_API_BASE_URL=https://api.openai.com/v1
+OPENAI_RECOMMENDATION_MODEL=gpt-5.6-sol
+OPENAI_MOCK_MODE=false
 ```
 
-Use `YOUCAM_MOCK_MODE=true` in Vercel Preview unless a preview deployment is intentionally validating the paid provider. `YOUCAM_API_KEY_SECRET` is not consumed by the current server adapter and is not required in Vercel.
+Use `YOUCAM_MOCK_MODE=true` and `OPENAI_MOCK_MODE=true` in Vercel Preview unless a preview deployment is intentionally validating paid providers. `YOUCAM_API_KEY_SECRET` is not consumed by the current server adapter and is not required in Vercel. OpenAI receives structured experiment measurements and routine product metadata, not scan images or raw check-in notes.
 
 After deployment, run the Playwright smoke journey against the deployment URL and verify sign-in, anonymous demo entry, direct image upload, scan completion, image deletion, and account deletion.
 

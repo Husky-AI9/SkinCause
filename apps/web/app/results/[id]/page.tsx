@@ -1,3 +1,6 @@
 import { ResultsPage } from "@/components/app-pages";
 
-export default ResultsPage;
+export default async function Page({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  return <ResultsPage id={id} />;
+}

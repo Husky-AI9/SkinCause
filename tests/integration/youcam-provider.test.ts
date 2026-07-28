@@ -2,6 +2,12 @@ import { YouCamSkinAnalysisProvider } from "@skincause/server-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 describe("YouCam provider integration", () => {
+  const sdPngBytes = new Uint8Array([
+    137, 80, 78, 71, 13, 10, 26, 10,
+    0, 0, 0, 13, 73, 72, 68, 82,
+    0, 0, 1, 224, 0, 0, 1, 224
+  ]);
+
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -26,8 +32,8 @@ describe("YouCam provider integration", () => {
 
     const provider = new YouCamSkinAnalysisProvider("test-api-key");
     const result = await provider.createAnalysis({
-      image: new Uint8Array([1, 2, 3]),
-      mimeType: "image/jpeg",
+      image: sdPngBytes,
+      mimeType: "image/png",
       requestedConcerns: ["redness", "texture"],
       idempotencyKey: "request-1"
     });
@@ -35,7 +41,7 @@ describe("YouCam provider integration", () => {
     expect(result.externalTaskId).toBe("task-1");
     expect(result.activity.map((event) => event.message)).toEqual([
       "POST /s2s/v2.1/file/skin-analysis -> 200; upload slot received",
-      "PUT signed provider upload -> 200; 3 bytes accepted",
+      "PUT signed provider upload -> 200; 24 bytes accepted",
       "POST /s2s/v2.1/task/skin-analysis -> 200; analysis task accepted"
     ]);
     expect(JSON.stringify(result.activity)).not.toContain("task-1");
@@ -47,9 +53,9 @@ describe("YouCam provider integration", () => {
     expect(JSON.parse(String(fileRequest[1]?.body))).toEqual({
       files: [
         {
-          content_type: "image/jpeg",
-          file_name: "scan.jpg",
-          file_size: 3
+          content_type: "image/png",
+          file_name: "scan.png",
+          file_size: 24
         }
       ]
     });
@@ -62,7 +68,8 @@ describe("YouCam provider integration", () => {
       miniserver_args: {
         enable_mask_overlay: true
       },
-      format: "json"
+      format: "json",
+      pf_camera_kit: false
     });
   });
 
@@ -104,23 +111,29 @@ describe("YouCam provider integration", () => {
     expect(analysis.activity.map((event) => event.message)).toEqual([
       "GET /s2s/v2.1/task/skin-analysis/:task_id -> 200",
       "provider status=success",
-      "response normalized: pores=35 redness=20; masks=2"
+      "response normalized: pores=38 redness=24; masks=2"
     ]);
     expect(analysis.result.concerns).toEqual([
       {
         key: "redness",
         providerLabel: "Redness",
+        displayLabel: "Visible redness pattern",
         rawScore: 76.5,
-        normalizedSeverity: 20,
+        uiScore: 80,
+        normalizedSeverity: 23.5,
         directionSource: "provider-doc",
+        experimentRole: "primary",
         maskUrl: "https://results.example.test/redness.jpg"
       },
       {
         key: "pores",
-        providerLabel: "Pores",
+        providerLabel: "Pore",
+        displayLabel: "Pore visibility",
         rawScore: 62,
-        normalizedSeverity: 35,
+        uiScore: 65,
+        normalizedSeverity: 38,
         directionSource: "provider-doc",
+        experimentRole: "primary",
         maskUrl: "https://results.example.test/pores.jpg"
       }
     ]);
@@ -128,7 +141,14 @@ describe("YouCam provider integration", () => {
 
   it("keeps non-terminal v2.1 tasks in processing", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-      Response.json({ data: { task_status: "running" } })
+      Response.json({
+        data: {
+          task_status: "running",
+          error_code: null,
+          error: null,
+          results: null
+        }
+      })
     );
 
     const provider = new YouCamSkinAnalysisProvider("test-api-key");

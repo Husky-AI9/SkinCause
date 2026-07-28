@@ -17,6 +17,7 @@ export interface WorkspaceRepository {
   hasActiveExperiment(ownerId: string): Promise<boolean>;
   hasNormalizedScan(ownerId: string): Promise<boolean>;
   ownsNormalizedScan(ownerId: string, scanId: string): Promise<boolean>;
+  getNormalizedScan(ownerId: string, scanId: string): Promise<import("@skincause/contracts").Scan | null>;
   createExperiment(ownerId: string, input: CreateExperiment): Promise<Experiment>;
   createCheckIn(
     ownerId: string,
@@ -78,11 +79,31 @@ export class PersistentWorkspaceService {
         409
       );
     }
-    if (!(await this.repository.hasNormalizedScan(ownerId))) {
+    const baseline = await this.repository.getNormalizedScan(ownerId, input.baselineScanId);
+    if (!baseline) {
       throw new WorkspaceRuleError(
         "BASELINE_REQUIRED",
-        "Complete a baseline scan before starting an experiment.",
+        "Choose a completed baseline scan before starting an experiment.",
         409
+      );
+    }
+    if (baseline.analysisProfileVersion !== input.analysisProfileVersion) {
+      throw new WorkspaceRuleError(
+        "BASELINE_PROFILE_MISMATCH",
+        "The baseline scan uses a different measurement profile.",
+        409
+      );
+    }
+    const eligibleConcerns = new Set(
+      baseline.concerns
+        .filter((concern) => concern.experimentRole === "primary")
+        .map((concern) => concern.key)
+    );
+    if (input.primaryConcerns.some((key) => !eligibleConcerns.has(key))) {
+      throw new WorkspaceRuleError(
+        "CONCERN_NOT_AVAILABLE",
+        "Choose measurements available in the baseline scan.",
+        400
       );
     }
     return this.repository.createExperiment(ownerId, input);
