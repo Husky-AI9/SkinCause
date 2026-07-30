@@ -1,7 +1,15 @@
 {
-  "extends": "../../tsconfig.base.json",
+  "extends": "expo/tsconfig.base",
   "compilerOptions": {
-    "lib": ["ES2022", "DOM"]
+    "strict": true,
+    "jsx": "react-jsx",
+    "baseUrl": ".",
+    "lib": ["ES2022"],
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "paths": {
+      "@skincause/*": ["../../packages/*/src"]
+    }
   },
-  "include": ["src"]
+  "include": ["app", "src", ".expo/types/**/*.ts", "expo-env.d.ts"]
 }

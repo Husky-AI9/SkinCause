@@ -54,12 +54,22 @@ describe("OpenAI routine recommendation provider", () => {
                   name: "Barrier moisturizer",
                   brand: "Example",
                   category: "Moisturizer",
-                  productUrl: "https://brand.example.test/product"
+                  productUrl: "https://brand.example.test/product",
+                  estimatedPrice: "$14.99",
+                  localAvailability: "Major US retailers",
+                  affordabilityNote: "Below the configured $25 target at the cited retailer."
                 },
                 summary: "Test one replacement.",
                 rationale: ["The experiment supports testing a different routine variable."],
                 evidence: ["Moderate association."],
                 measurementKeys: ["redness", "texture"],
+                nutritionGuidance: {
+                  focus: "Consistent meal pattern",
+                  suggestion: "Track major diet changes without removing several foods.",
+                  foodsToConsider: ["Fresh vegetables", "Beans", "Steel-cut oats"],
+                  evidenceNote: "Diet evidence is mixed and does not establish causation.",
+                  trackingPrompt: "Did your meal pattern change since the last scan?"
+                },
                 uncertainty: "The candidate still needs a controlled test."
               }),
               annotations: []
@@ -91,6 +101,7 @@ describe("OpenAI routine recommendation provider", () => {
     expect(body.tools).toEqual([{ type: "web_search", search_context_size: "low" }]);
     expect(body.tool_choice).toBe("required");
     expect(body.text.format.strict).toBe(true);
+    expect(body.input[1].content).toContain("\"maxUnitPriceUsd\":25");
     expect(body.input[1].content).not.toContain("notes");
   });
 });

@@ -2,7 +2,7 @@
 
 ## Mission
 
-Build a trustworthy, privacy-first, cross-platform routine debugger. Use repeated YouCam Skin AI measurements inside controlled single-variable experiments. Never present SkinCause as a diagnostic or treatment product. The web app is one client; preserve a direct path to Expo Android/iOS.
+Build a trustworthy, privacy-first, cross-platform acne-pattern and routine guidance product. Use YouCam Skin AI to measure visible acne-related patterns, OpenAI to organize affordable product and nutrition guidance, and repeated measurements inside controlled single-variable experiments. Never present SkinCause as a diagnostic or treatment product, and never present a simulation as a guaranteed outcome. The web app is one client; preserve a direct path to Expo Android/iOS.
 
 ## Source of truth
 

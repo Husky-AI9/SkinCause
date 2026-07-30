@@ -11,8 +11,8 @@ const plusJakartaSans = Plus_Jakarta_Sans({
 });
 
 export const metadata: Metadata = {
-  title: "SkinCause | Understand what changed",
-  description: "A privacy-first skincare routine debugger for controlled, repeatable cosmetic tracking."
+  title: "SkinCause | Affordable AI acne guidance",
+  description: "YouCam acne-pattern analysis, affordable AI skincare guidance, nutrition context, simulation, and repeatable cosmetic tracking."
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

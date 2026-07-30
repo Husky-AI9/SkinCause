@@ -1,18 +1,26 @@
-import type {
-  Experiment,
-  Product,
-  RoutineRecommendation
+import {
+  routineRecommendationSchema,
+  type Experiment,
+  type Product,
+  type RoutineRecommendation
 } from "@skincause/contracts";
-import { routineRecommendationDisclaimer } from "@skincause/domain";
+import {
+  acneNutritionGuardrails,
+  defaultAcneGuidancePreferences,
+  routineRecommendationDisclaimer
+} from "@skincause/domain";
 import { z } from "zod";
 
-const PROMPT_VERSION = "routine-recommendation-v3";
+const PROMPT_VERSION = "acne-guidance-v2";
 
 const candidateProductSchema = z.object({
   name: z.string().min(1).max(200),
   brand: z.string().min(1).max(120),
   category: z.string().min(1).max(120),
-  productUrl: z.string().url().regex(/^https:\/\//i).nullable()
+  productUrl: z.string().url().regex(/^https:\/\//i).nullable(),
+  estimatedPrice: z.string().min(1).max(80).nullable(),
+  localAvailability: z.string().min(1).max(200).nullable(),
+  affordabilityNote: z.string().min(1).max(300).nullable()
 });
 
 const generatedRecommendationSchema = z.object({
@@ -23,6 +31,13 @@ const generatedRecommendationSchema = z.object({
   rationale: z.array(z.string().min(1).max(300)).max(3),
   evidence: z.array(z.string().min(1).max(300)).max(4),
   measurementKeys: z.array(z.string().min(1).max(100)).max(3),
+  nutritionGuidance: z.object({
+    focus: z.string().min(1).max(120),
+    suggestion: z.string().min(1).max(400),
+    foodsToConsider: z.array(z.string().min(1).max(120)).min(1).max(4),
+    evidenceNote: z.string().min(1).max(400),
+    trackingPrompt: z.string().min(1).max(300)
+  }),
   uncertainty: z.string().min(1).max(500)
 });
 
@@ -72,9 +87,20 @@ const recommendationJsonSchema = {
             name: { type: "string" },
             brand: { type: "string" },
             category: { type: "string" },
-            productUrl: { type: ["string", "null"] }
+            productUrl: { type: ["string", "null"] },
+            estimatedPrice: { type: ["string", "null"] },
+            localAvailability: { type: ["string", "null"] },
+            affordabilityNote: { type: ["string", "null"] }
           },
-          required: ["name", "brand", "category", "productUrl"]
+          required: [
+            "name",
+            "brand",
+            "category",
+            "productUrl",
+            "estimatedPrice",
+            "localAvailability",
+            "affordabilityNote"
+          ]
         },
         { type: "null" }
       ]
@@ -95,6 +121,23 @@ const recommendationJsonSchema = {
       items: { type: "string" },
       maxItems: 3
     },
+    nutritionGuidance: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        focus: { type: "string" },
+        suggestion: { type: "string" },
+        foodsToConsider: {
+          type: "array",
+          items: { type: "string" },
+          minItems: 1,
+          maxItems: 4
+        },
+        evidenceNote: { type: "string" },
+        trackingPrompt: { type: "string" }
+      },
+      required: ["focus", "suggestion", "foodsToConsider", "evidenceNote", "trackingPrompt"]
+    },
     uncertainty: { type: "string" }
   },
   required: [
@@ -105,6 +148,7 @@ const recommendationJsonSchema = {
     "rationale",
     "evidence",
     "measurementKeys",
+    "nutritionGuidance",
     "uncertainty"
   ]
 } as const;
@@ -120,6 +164,12 @@ export type RecommendationEvidenceContext = {
     result: Experiment["result"] | null;
   };
   products: Array<Pick<Product, "id" | "name" | "category" | "active" | "recentlyChanged">>;
+  guidancePreferences: {
+    market: string;
+    maxUnitPriceUsd: number;
+    priorities: string[];
+    nutritionGuardrails: string[];
+  };
 };
 
 export type GeneratedRoutineRecommendation = z.infer<typeof generatedRecommendationSchema> & {
@@ -205,12 +255,19 @@ export class OpenAiRoutineRecommendationProvider implements RoutineRecommendatio
           {
             role: "system",
             content: [
-              "Recommend one cosmetic routine action: remove, replace, add, keep, or no_change.",
+              "Create one acne-focused cosmetic routine action: remove, replace, add, keep, or no_change.",
               "You may select any supplied existing product for removal or replacement.",
-              "For add or replace, web-search and return one real current product candidate; do not invent availability, ingredients, or claims.",
+              "Prioritize the visible acne or blemish measurement when it is available; use oiliness, redness, pores, and texture only as supporting cosmetic signals.",
+              "For add or replace, web-search and return one real current non-prescription product candidate that fits the supplied budget and market.",
+              "The candidate must include a direct HTTPS manufacturer or established-retailer product page that a user can open to verify or purchase it.",
+              "Use current product or retailer sources for price, availability, and label claims; include the exact candidate product URL in the returned web sources and return null for price or availability when those facts cannot be verified.",
+              "Prefer simple, widely available, acne-friendly routine categories and avoid recommending prescription products.",
               "Choose up to three measurementKeys only from the supplied experiment primaryConcerns.",
               "Keep the recommendation to one routine change so it can be tested in a controlled experiment.",
-              "Do not diagnose, prescribe treatment, claim causation, or establish product safety or suitability.",
+              "Also return two to four specific, ordinary foods the user could consider eating, supported by a reputable dermatology or public-health source.",
+              "Prefer balanced lower-glycemic examples such as vegetables, beans, intact oats, or fruit when supported by the source.",
+              "Nutrition guidance must be an optional observation or balanced-food habit, never a supplement, fasting plan, restrictive elimination diet, or replacement for professional care.",
+              "Do not diagnose acne, prescribe treatment, claim causation, promise improvement, or establish product safety or suitability.",
               "When experiment evidence is insufficient, clearly identify the recommendation as a hypothesis to test rather than an evidence-backed conclusion.",
               "Never change the user's routine automatically."
             ].join(" ")
@@ -271,10 +328,13 @@ export class MockRoutineRecommendationProvider implements RoutineRecommendationP
         action: "replace",
         existingProductId: experiment.suspectProductId,
         candidateProduct: {
-          name: "Fragrance-free barrier moisturizer",
-          brand: "Demo catalog",
+          name: "Daily Facial Moisturizer",
+          brand: "Vanicream",
           category: "Moisturizer",
-          productUrl: null
+          productUrl: "https://www.target.com/p/-/A-80038093",
+          estimatedPrice: "$13.99 at Target when checked",
+          localAvailability: "Listed in stock online; local availability may vary",
+          affordabilityNote: "A real budget-friendly candidate below the $25 demo limit; verify the current price and label before buying."
         },
         summary: `Consider testing one replacement for ${experiment.suspectProductName}.`,
         rationale: ["The repeated measurements moved in the experiment's expected direction."],
@@ -283,18 +343,45 @@ export class MockRoutineRecommendationProvider implements RoutineRecommendationP
           `Visible trend ${experiment.result?.components.imageTrend ?? 0}/100`
         ],
         measurementKeys: experiment.primaryConcerns.slice(0, 3),
+        nutritionGuidance: {
+          focus: "Keep food changes observable",
+          suggestion: "Consider adding one lower-glycemic food at a time while keeping the rest of your meals broadly consistent.",
+          foodsToConsider: ["Fresh vegetables", "Beans or lentils", "Steel-cut oats"],
+          evidenceNote: "Diet may be associated with acne for some people, but evidence varies and does not prove that a food caused this pattern.",
+          trackingPrompt: "Which suggested food did you eat consistently since the last scan, if any?"
+        },
         uncertainty: "This demo candidate is not a safety assessment or proof of causation.",
-        sources: []
+        sources: [
+          {
+            title: "American Academy of Dermatology: Can the right diet get rid of acne?",
+            url: "https://www.aad.org/public/diseases/acne/causes/diet"
+          },
+          {
+            title: "American Academy of Dermatology: Skin care on a budget",
+            url: "https://www.aad.org/public/everyday-care/skin-care-basics/care/skin-care-budget"
+          },
+          {
+            title: "Target: Vanicream Daily Facial Moisturizer",
+            url: "https://www.target.com/p/-/A-80038093"
+          },
+          {
+            title: "Vanicream: Daily Facial Moisturizer",
+            url: "https://www.vanicream.com/product/vanicream-daily-facial-moisturizer"
+          }
+        ]
       };
     }
     return {
       action: "add",
       existingProductId: null,
       candidateProduct: {
-        name: "Simple hydrating moisturizer",
-        brand: "Demo catalog",
+        name: "Daily Facial Moisturizer",
+        brand: "Vanicream",
         category: "Moisturizer",
-        productUrl: null
+        productUrl: "https://www.target.com/p/-/A-80038093",
+        estimatedPrice: "$13.99 at Target when checked",
+        localAvailability: "Listed in stock online; local availability may vary",
+        affordabilityNote: "A real budget-friendly candidate below the $25 demo limit; verify the current price and label before buying."
       },
       summary: "Consider testing one simple routine addition while keeping everything else stable.",
       rationale: ["The current evidence does not support removing a specific routine product."],
@@ -304,8 +391,32 @@ export class MockRoutineRecommendationProvider implements RoutineRecommendationP
           : "The deterministic experiment result shows a low association."
       ],
       measurementKeys: experiment.primaryConcerns.slice(0, 3),
+      nutritionGuidance: {
+        focus: "Nutrition is context, not a conclusion",
+        suggestion: "Consider adding one lower-glycemic food at a time and log it instead of removing several foods.",
+        foodsToConsider: ["Fresh vegetables", "Beans or lentils", "Steel-cut oats"],
+        evidenceNote: "Research on diet and acne is mixed, so nutrition should remain a tracked context variable.",
+        trackingPrompt: "Which suggested food did you eat consistently since the last scan, if any?"
+      },
       uncertainty: "This is a testable hypothesis, not an evidence-backed product conclusion.",
-      sources: []
+      sources: [
+        {
+          title: "American Academy of Dermatology: Can the right diet get rid of acne?",
+          url: "https://www.aad.org/public/diseases/acne/causes/diet"
+        },
+        {
+          title: "American Academy of Dermatology: Skin care on a budget",
+          url: "https://www.aad.org/public/everyday-care/skin-care-basics/care/skin-care-budget"
+        },
+        {
+          title: "Target: Vanicream Daily Facial Moisturizer",
+          url: "https://www.target.com/p/-/A-80038093"
+        },
+        {
+          title: "Vanicream: Daily Facial Moisturizer",
+          url: "https://www.vanicream.com/product/vanicream-daily-facial-moisturizer"
+        }
+      ]
     };
   }
 }
@@ -349,7 +460,13 @@ export function buildRecommendationContext(
         category,
         active,
         recentlyChanged
-      }))
+      })),
+    guidancePreferences: {
+      market: defaultAcneGuidancePreferences.market,
+      maxUnitPriceUsd: defaultAcneGuidancePreferences.maxUnitPriceUsd,
+      priorities: [...defaultAcneGuidancePreferences.priorities],
+      nutritionGuardrails: [...acneNutritionGuardrails]
+    }
   };
 }
 
@@ -379,6 +496,7 @@ function safeNoChange(
     rationale: generated.rationale.slice(0, 3),
     evidence: generated.evidence.slice(0, 4),
     measurementKeys: generated.measurementKeys.slice(0, 3),
+    nutritionGuidance: generated.nutritionGuidance,
     uncertainty: "The proposed product combination did not satisfy the one-change validation rules.",
     sources: generated.sources
   };
@@ -391,7 +509,10 @@ export class PersistentRoutineRecommendationService {
   ) {}
 
   async get(ownerId: string, experimentId: string) {
-    return (await this.repository.find(ownerId, experimentId))?.recommendation ?? null;
+    const stored = await this.repository.find(ownerId, experimentId);
+    if (!stored) return null;
+    const parsed = routineRecommendationSchema.safeParse(stored.recommendation);
+    return parsed.success ? parsed.data : null;
   }
 
   async generate(ownerId: string, experiment: Experiment, products: Product[]) {

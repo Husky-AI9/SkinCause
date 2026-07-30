@@ -20,6 +20,28 @@ and communicate uncertainty.**
 
 **Portability principle: the web app is a client, not the product core. Keep domain logic, schemas, and server workflows independent of React and Next.js so Android and iOS can reuse them.**
 
+## **2026-07-29 Product Refocus**
+
+SkinCause is now acne-first. The primary journey combines four connected
+capabilities:
+
+1.  YouCam Skin Analysis measures visible acne/blemish patterns and relevant
+    supporting cosmetic signals such as oiliness, redness, pores, and texture.
+2.  OpenAI organizes one affordable skincare product action using the scan,
+    routine history, experiment evidence, a user budget, and local availability.
+3.  Nutrition guidance provides conservative, source-backed context and a
+    trackable observation. It must not prescribe a restrictive diet, supplement,
+    or claim that food caused a breakout.
+4.  YouCam Skin Simulation creates an illustrative appearance based on selected
+    cosmetic measurement changes. It is a visual experiment goal, not a forecast
+    of what a product will do.
+
+The controlled one-change experiment remains the trust layer underneath the
+experience. The product must say “visible acne pattern,” “acne-related cosmetic
+signal,” or “acne-focused guidance” instead of claiming to detect, diagnose,
+treat, or cure acne. Product price and availability must be presented as
+time-sensitive information that the user should verify.
+
 # **0. How to Use This Specification**
 
 This document is designed so Codex can create the project from an empty

@@ -8,6 +8,8 @@ import type {
   LocalImageAsset,
   Product,
   ProductUpdate,
+  RoutineRecommendation,
+  SkinSimulation,
   ScanUploadSession
 } from "@skincause/contracts";
 
@@ -58,6 +60,25 @@ export function createApiClient(options: ApiClientOptions) {
       request<Product>(`/products/${id}`, { method: "PATCH", body: JSON.stringify(input), signal }),
     listExperiments: (signal?: AbortSignal) => request<Experiment[]>("/experiments", { signal }),
     getExperiment: (id: string, signal?: AbortSignal) => request<Experiment>(`/experiments/${id}`, { signal }),
+    getRoutineRecommendation: (id: string, signal?: AbortSignal) =>
+      request<RoutineRecommendation | null>(`/experiments/${id}/recommendation`, { signal }),
+    generateRoutineRecommendation: (id: string, signal?: AbortSignal) =>
+      request<RoutineRecommendation>(`/experiments/${id}/recommendation`, {
+        method: "POST",
+        signal
+      }),
+    getSkinSimulation: (id: string, signal?: AbortSignal) =>
+      request<SkinSimulation | null>(`/experiments/${id}/simulation`, { signal }),
+    startSkinSimulation: (id: string, signal?: AbortSignal) =>
+      request<SkinSimulation>(`/experiments/${id}/simulation`, {
+        method: "POST",
+        signal
+      }),
+    deleteSkinSimulation: (id: string, signal?: AbortSignal) =>
+      request<{ experimentId: string; imageDeleted: boolean }>(
+        `/experiments/${id}/simulation`,
+        { method: "DELETE", signal }
+      ),
     createExperiment: (input: CreateExperiment, signal?: AbortSignal) =>
       request<Experiment>("/experiments", { method: "POST", body: JSON.stringify(input), signal }),
     createCheckIn: (experimentId: string, input: CreateCheckIn, signal?: AbortSignal) =>

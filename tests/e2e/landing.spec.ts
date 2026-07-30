@@ -4,12 +4,12 @@ import path from "node:path";
 test("landing page presents the scan-led editorial experience", async ({ page }, testInfo) => {
   await page.goto("/");
 
-  await expect(page.getByRole("heading", { name: "Understand what changed.", level: 1 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "A clearer acne plan.", level: 1 })).toBeVisible();
   await expect(page.getByRole("img", { name: /standardized cosmetic scan/i })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Analyze skin" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Dashboard" })).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: "Measure what changes. Keep what does not." })).toBeVisible();
-  await expect(page.getByRole("heading", { name: /See the pattern/i })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Start acne analysis" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Acne plan" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Scan. Recommend. Simulate. Verify." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /See the acne pattern/i })).toBeVisible();
 
   const hasHorizontalOverflow = await page.evaluate(
     () => document.documentElement.scrollWidth > document.documentElement.clientWidth

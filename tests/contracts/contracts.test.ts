@@ -127,13 +127,23 @@ describe("portable API contracts", () => {
         name: "Candidate moisturizer",
         brand: "Example brand",
         category: "Moisturizer",
-        productUrl: "https://example.test/product"
+        productUrl: "https://example.test/product",
+        estimatedPrice: "$12.99",
+        localAvailability: "Major US retailers",
+        affordabilityNote: "Below the configured demo budget."
       },
       summary: "Test one replacement while keeping the rest of the routine stable.",
       rationale: ["The experiment showed a repeated visible pattern."],
       evidence: ["Moderate deterministic association."],
       measurementKeys: ["redness", "texture"],
       sources: [{ title: "Product page", url: "https://example.test/product" }],
+      nutritionGuidance: {
+        focus: "Meal consistency",
+        suggestion: "Track major diet changes.",
+        foodsToConsider: ["Fresh vegetables", "Beans", "Steel-cut oats"],
+        evidenceNote: "Evidence is mixed.",
+        trackingPrompt: "Did your meal pattern change?"
+      },
       uncertainty: "This is a hypothesis to test, not proof of suitability.",
       disclaimer: "Not medical advice."
     }).success).toBe(true);

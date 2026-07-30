@@ -11,7 +11,7 @@ test("uploads a real face image and renders live YouCam results", async ({ page 
   });
 
   await page.goto("/");
-  await page.getByRole("link", { name: "Analyze skin" }).click();
+  await page.getByRole("link", { name: "Start acne analysis" }).click();
   await expect(page).toHaveURL(/scan\/new/);
   await expect(page.getByRole("button", { name: "Upload your image" })).toBeEnabled();
   await page.getByLabel("Choose a JPG or PNG image").setInputFiles(faceImage);

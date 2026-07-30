@@ -16,6 +16,7 @@ import {
   persistentDisclaimer
 } from "@skincause/domain";
 import {
+  ArrowLeft,
   ArrowRight,
   CalendarDays,
   Camera,
@@ -23,7 +24,6 @@ import {
   CheckCircle2,
   CircleDot,
   CloudSun,
-  Download,
   Droplets,
   Eye,
   FileJson,
@@ -42,8 +42,7 @@ import {
   Sparkles,
   Trash2,
   Upload,
-  Waves,
-  XCircle
+  Waves
 } from "lucide-react";
 import NextImage from "next/image";
 import Link from "next/link";
@@ -55,6 +54,46 @@ import { YouCamCameraKit } from "./youcam-camera-kit";
 
 const experimentId = "brightening-serum-elimination";
 const aiCandidateProductId = "__ai_candidate_product__";
+const plannedAiExperimentStorageKey = "skincause-planned-ai-experiment";
+const latestScanResultStorageKey = "skincause-latest-scan-result";
+
+const dailyNutritionTargets = [
+  {
+    food: "Mixed berries",
+    amount: "1 cup",
+    serving: "Fresh or frozen, unsweetened"
+  },
+  {
+    food: "Fresh vegetables",
+    amount: "2 cups",
+    serving: "Across meals; use a mix of colors"
+  },
+  {
+    food: "Beans or lentils",
+    amount: "1/2 cup",
+    serving: "Cooked, unsweetened serving"
+  },
+  {
+    food: "Steel-cut oats",
+    amount: "1/2 cup",
+    serving: "Cooked; choose an unsweetened bowl"
+  },
+  {
+    food: "Water",
+    amount: "6–8 cups",
+    serving: "About 1.5–2 L; adjust for heat and activity"
+  }
+] as const;
+
+type PlannedAiExperiment = {
+  actionLabel: string;
+  productName: string | null;
+  productMeta: string | null;
+  productUrl: string | null;
+  nutritionObservation: string | null;
+  measurementKeys?: string[];
+  hypothesis: string;
+};
 
 type ScanStatusResponse = {
   scanId: string;
@@ -129,8 +168,8 @@ function mergeActivity(current: ScanActivityEvent[], incoming: ScanActivityEvent
 
 function orderedConcerns(scan: Scan) {
   const order = new Map([
-    ["redness", 0],
-    ["blemish_pattern", 1],
+    ["blemish_pattern", 0],
+    ["redness", 1],
     ["texture", 2],
     ["pores", 3],
     ["oiliness", 4],
@@ -217,7 +256,7 @@ export function ConsentPage() {
                 Normalized concern scores and capture-quality notes are stored for your timeline. They may remain after the original image is deleted.
               </ConsentItem>
               <ConsentItem icon={Trash2} title="Your controls">
-                Delete individual original images, export your investigation, or delete the entire workspace from the Privacy Center.
+                Delete your account data at any time from the Acne plan.
               </ConsentItem>
             </div>
           </section>
@@ -379,9 +418,47 @@ export function OnboardingPage() {
   );
 }
 
-export function DashboardPage() {
-  const { products, checkInSaved } = useAppState();
+export function LegacyDashboardPage() {
+  const router = useRouter();
+  const {
+    apiFetch,
+    authStatus,
+    checkInSaved,
+    demoMode,
+    exitDemo,
+    products,
+    reset,
+    signOut
+  } = useAppState();
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
   const result = seededExperiment.result;
+
+  async function deleteUserData() {
+    setDeleteBusy(true);
+    setDeleteError("");
+    try {
+      if (demoMode) {
+        await exitDemo();
+      } else {
+        if (authStatus === "authenticated") {
+          await readApiResponse(await apiFetch("/api/v1/account", { method: "DELETE" }));
+          await signOut().catch(() => undefined);
+        }
+        reset();
+        window.localStorage.removeItem("skincause-active-scan");
+        window.localStorage.removeItem("skincause-latest-scan");
+        window.localStorage.removeItem("skincause-active-experiment");
+      }
+      router.replace("/");
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : "Your data could not be deleted.");
+    } finally {
+      setDeleteBusy(false);
+    }
+  }
+
   return (
     <main className="page-shell" id="main">
       <h1 className="sr-only">Dashboard</h1>
@@ -390,24 +467,24 @@ export function DashboardPage() {
           <section className="panel">
             <div className="panel-header">
               <div>
-                <p className="eyebrow">Brightening serum elimination</p>
-                <h2>Redness and texture trend</h2>
-                <p>Baseline compared with three standardized follow-ups.</p>
+                <p className="eyebrow">Acne-focused progress</p>
+                <h2>Visible acne-pattern trend</h2>
+                <p>YouCam-compatible baseline compared with three standardized follow-ups.</p>
               </div>
               <span className="status-pill success"><CheckCircle2 size={14} /> Completed</span>
             </div>
             <div className="trend-layout">
               <ScoreDisc score={result.score ?? 0} label="evidence score" />
               <div>
-                <div className="trend-chart" role="img" aria-label="Redness severity decreased from 68 at baseline to 43 at follow-up three">
-                  {[68, 58, 47, 43].map((value, index) => (
+                <div className="trend-chart" role="img" aria-label="Visible acne-pattern severity decreased from 60 at baseline to 38 at follow-up three">
+                  {[60, 52, 43, 38].map((value, index) => (
                     <div className="trend-column" key={value}>
                       <div className="trend-bar" style={{ height: `${value}%` }} title={`${value}`} />
                       <span>{index === 0 ? "Baseline" : `Day ${index * 5}`}</span>
                     </div>
                   ))}
                 </div>
-                <p className="muted" style={{ marginTop: 36 }}>Redness severity decreased 25 points across the available mock scans.</p>
+                <p className="muted" style={{ marginTop: 36 }}>Visible acne-pattern severity decreased 22 points across the available demo scans.</p>
               </div>
             </div>
           </section>
@@ -434,9 +511,9 @@ export function DashboardPage() {
         <aside>
           <section className="panel next-action">
             <p className="eyebrow">Next best action</p>
-            <h2>Review the evidence</h2>
-            <p>{result.wording}</p>
-            <Link className="button" href={`/results/${experimentId}`}>Open result <ArrowRight size={18} /></Link>
+            <h2>Review the affordable AI plan</h2>
+            <p>See the suggested product action, nutrition context, and YouCam illustration beside the experiment evidence.</p>
+            <Link className="button" href={`/experiments/new?from=${experimentId}`}>Open acne plan <ArrowRight size={18} /></Link>
           </section>
           <section className="panel">
             <div className="panel-header">
@@ -454,14 +531,488 @@ export function DashboardPage() {
           </section>
           <section className="panel">
             <div className="panel-header">
+              <div><h3>Nutrition context</h3><p>Tracked, never assumed</p></div>
+              <CircleDot size={22} />
+            </div>
+            <p className="muted">Keep meals broadly consistent and record major changes beside each scan. Food relationships vary and do not prove the cause of a visible acne pattern.</p>
+          </section>
+          <section className="panel">
+            <div className="panel-header">
               <div><h3>Analysis provider</h3><p>Deterministic demo mode</p></div>
               <ScanFace size={22} />
             </div>
             <span className="status-pill success">YouCam-compatible mock</span>
             <p className="muted" style={{ marginTop: 12 }}>Upload → task → poll → normalized concern scores. No API units used in demo mode.</p>
           </section>
+          <section className="panel">
+            <p className="eyebrow">Data control</p>
+            <h3>Delete your data</h3>
+            <p className="muted">Permanently remove your routine, scans, experiments, check-ins, and account data.</p>
+            {!confirmDelete ? (
+              <button
+                className="button button-danger"
+                type="button"
+                onClick={() => {
+                  setDeleteError("");
+                  setConfirmDelete(true);
+                }}
+              >
+                <Trash2 size={18} /> Delete my data
+              </button>
+            ) : (
+              <div className="callout danger">
+                <strong>This cannot be undone.</strong>
+                <p>Confirm that you want to permanently delete all of your SkinCause data.</p>
+                {deleteError ? <p className="form-error" role="alert">{deleteError}</p> : null}
+                <div className="row-actions" style={{ marginTop: 12 }}>
+                  <button
+                    className="button button-danger button-small"
+                    type="button"
+                    disabled={deleteBusy}
+                    onClick={() => void deleteUserData()}
+                  >
+                    <Trash2 size={16} /> {deleteBusy ? "Deleting..." : "Permanently delete"}
+                  </button>
+                  <button
+                    className="button button-secondary button-small"
+                    type="button"
+                    disabled={deleteBusy}
+                    onClick={() => {
+                      setConfirmDelete(false);
+                      setDeleteError("");
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+          </section>
         </aside>
       </div>
+    </main>
+  );
+}
+
+export function DashboardPage() {
+  const router = useRouter();
+  const {
+    apiFetch,
+    authStatus,
+    checkInSaved,
+    demoMode,
+    exitDemo,
+    products,
+    reset,
+    signOut
+  } = useAppState();
+  const [latestScan, setLatestScan] = useState<Scan | null>(null);
+  const [latestExperiment, setLatestExperiment] = useState<Experiment | null>(null);
+  const [plannedExperiment, setPlannedExperiment] = useState<PlannedAiExperiment | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(true);
+  const [summaryError, setSummaryError] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
+
+  useEffect(() => {
+    if (authStatus === "loading") return;
+    let active = true;
+
+    async function loadPlanSummary() {
+      await Promise.resolve();
+      if (!active) return;
+
+      let storedScan: Scan | null = null;
+      const storedScanValue = window.localStorage.getItem(latestScanResultStorageKey);
+      if (storedScanValue) {
+        try {
+          const parsed = JSON.parse(storedScanValue) as Partial<Scan>;
+          if (typeof parsed.id === "string" && Array.isArray(parsed.concerns)) {
+            storedScan = parsed as Scan;
+          }
+        } catch {
+          window.localStorage.removeItem(latestScanResultStorageKey);
+        }
+      }
+
+      let storedPlan: PlannedAiExperiment | null = null;
+      const storedPlanValue = window.localStorage.getItem(plannedAiExperimentStorageKey);
+      if (storedPlanValue && authStatus !== "authenticated") {
+        try {
+          const parsed = JSON.parse(storedPlanValue) as Partial<PlannedAiExperiment>;
+          if (typeof parsed.actionLabel === "string" && typeof parsed.hypothesis === "string") {
+            storedPlan = {
+              actionLabel: parsed.actionLabel,
+              productName: typeof parsed.productName === "string" ? parsed.productName : null,
+              productMeta: typeof parsed.productMeta === "string" ? parsed.productMeta : null,
+              productUrl: typeof parsed.productUrl === "string" ? parsed.productUrl : null,
+              nutritionObservation:
+                typeof parsed.nutritionObservation === "string"
+                  ? parsed.nutritionObservation
+                  : null,
+              measurementKeys: Array.isArray(parsed.measurementKeys)
+                ? parsed.measurementKeys.filter((key): key is string => typeof key === "string")
+                : undefined,
+              hypothesis: parsed.hypothesis
+            };
+          }
+        } catch {
+          window.localStorage.removeItem(plannedAiExperimentStorageKey);
+        }
+      }
+
+      try {
+        let experiment: Experiment | null = null;
+        if (authStatus === "authenticated") {
+          const experiments = await readApiResponse<Experiment[]>(
+            await apiFetch("/api/v1/experiments", { cache: "no-store" })
+          );
+          experiment =
+            experiments.find((item) => item.status === "active") ??
+            experiments[0] ??
+            null;
+
+          if (!storedScan) {
+            const scanId =
+              window.localStorage.getItem("skincause-latest-scan") ??
+              experiment?.baselineScanId ??
+              null;
+            if (scanId) {
+              const scanStatus = await readApiResponse<ScanStatusResponse>(
+                await apiFetch(`/api/v1/scans/${encodeURIComponent(scanId)}`, {
+                  cache: "no-store"
+                })
+              );
+              storedScan = scanStatus.result ?? null;
+            }
+          }
+        }
+
+        if (!active) return;
+        setLatestScan(storedScan);
+        setLatestExperiment(experiment);
+        setPlannedExperiment(storedPlan);
+      } catch (error) {
+        if (!active) return;
+        setLatestScan(storedScan);
+        setPlannedExperiment(storedPlan);
+        setSummaryError(
+          error instanceof Error ? error.message : "Your latest plan could not be loaded."
+        );
+      } finally {
+        if (active) setSummaryLoading(false);
+      }
+    }
+
+    void loadPlanSummary();
+    return () => {
+      active = false;
+    };
+  }, [apiFetch, authStatus]);
+
+  async function deleteUserData() {
+    setDeleteBusy(true);
+    setDeleteError("");
+    try {
+      if (demoMode) {
+        await exitDemo();
+      } else {
+        if (authStatus === "authenticated") {
+          await readApiResponse(await apiFetch("/api/v1/account", { method: "DELETE" }));
+          await signOut().catch(() => undefined);
+        }
+        reset();
+        window.localStorage.removeItem("skincause-active-scan");
+        window.localStorage.removeItem("skincause-latest-scan");
+        window.localStorage.removeItem("skincause-active-experiment");
+      }
+      window.localStorage.removeItem(latestScanResultStorageKey);
+      window.localStorage.removeItem(plannedAiExperimentStorageKey);
+      router.replace("/");
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : "Your data could not be deleted.");
+    } finally {
+      setDeleteBusy(false);
+    }
+  }
+
+  const displayedScan = latestScan ?? (demoMode ? scans[0] : null);
+  const displayedConcerns = displayedScan ? orderedConcerns(displayedScan).slice(0, 5) : [];
+  const acneConcern = displayedConcerns.find((concern) => concern.key === "blemish_pattern");
+  const demoExperiment = demoMode ? seededExperiment : null;
+  const selectedProductId =
+    latestExperiment?.suspectProductId ?? demoExperiment?.suspectProductId;
+  const selectedProduct = products.find((product) => product.id === selectedProductId);
+  const experimentProductName =
+    plannedExperiment?.productName ??
+    latestExperiment?.suspectProductName ??
+    selectedProduct?.name ??
+    "No product selected";
+  const experimentType = latestExperiment?.type ?? demoExperiment?.type;
+  const experimentAction =
+    plannedExperiment?.actionLabel ??
+    (experimentType
+      ? experimentType === "elimination"
+        ? "Suspend one product"
+        : "Introduce one product"
+      : "No experiment planned");
+  const fullHypothesis =
+    plannedExperiment?.hypothesis ??
+    latestExperiment?.hypothesis ??
+    demoExperiment?.hypothesis ??
+    "Start an experiment to connect one routine change with repeatable scan measurements.";
+  const nutritionMarker = "Nutrition context to track:";
+  const experimentHypothesis = fullHypothesis.split(`\n\n${nutritionMarker}`)[0];
+  const nutritionObservation =
+    plannedExperiment?.nutritionObservation ??
+    (fullHypothesis.includes(nutritionMarker)
+      ? fullHypothesis.split(nutritionMarker).at(-1)?.trim() ?? null
+      : null);
+  const primaryConcernKeys =
+    latestExperiment?.primaryConcerns ??
+    plannedExperiment?.measurementKeys ??
+    (demoMode
+      ? ["blemish_pattern", "redness", "texture"]
+      : displayedConcerns.slice(0, 3).map((concern) => concern.key));
+  const experimentDetailId = latestExperiment?.id ?? (demoMode ? experimentId : null);
+  const experimentStatus =
+    latestExperiment?.status ?? demoExperiment?.status ?? (plannedExperiment ? "planned" : null);
+  const activeProductCount = products.filter((product) => product.active).length;
+  const checkInCount =
+    (latestExperiment?.checkIns.length ?? demoExperiment?.checkIns.length ?? 0) +
+    (checkInSaved ? 1 : 0);
+
+  return (
+    <main className="page-shell acne-plan-page" id="main">
+      <section className="acne-plan-hero">
+        <div>
+          <p className="eyebrow">Your SkinCause workspace</p>
+          <h1>Acne plan</h1>
+          <p>Your latest scan, one-variable experiment, routine, and daily nutrition targets in one place.</p>
+          <div className="acne-plan-actions">
+            <Link className="button button-secondary" href="/scan/new">
+              <ScanFace size={18} /> New scan
+            </Link>
+            <Link className="button" href="/experiments/new">
+              Plan experiment <ArrowRight size={18} />
+            </Link>
+          </div>
+        </div>
+      </section>
+
+      {summaryError ? <div className="callout danger" role="alert">{summaryError}</div> : null}
+
+      <section className="acne-plan-overview" aria-label="Acne plan overview">
+        <article className="acne-plan-stat">
+          <span>Latest acne signal</span>
+          <strong>{summaryLoading ? "…" : acneConcern?.normalizedSeverity ?? "—"}</strong>
+          <small>
+            {displayedScan
+              ? classifyCosmeticConcern(acneConcern?.normalizedSeverity ?? null).label
+              : "Complete a scan to begin"}
+          </small>
+        </article>
+        <article className="acne-plan-stat">
+          <span>Experiment change</span>
+          <strong className="is-text">{experimentAction}</strong>
+          <small>{experimentProductName}</small>
+        </article>
+        <article className="acne-plan-stat">
+          <span>Current routine</span>
+          <strong>{activeProductCount}</strong>
+          <small>
+            {activeProductCount === 1 ? "active product" : "active products"} · {checkInCount} check-ins
+          </small>
+        </article>
+      </section>
+
+      <div className="acne-plan-content-grid">
+        <section className="panel acne-plan-scan-card">
+          <div className="panel-header">
+            <div>
+              <p className="eyebrow">Latest scan</p>
+              <h2>Visible skin measurements</h2>
+              <p>
+                {displayedScan
+                  ? `Captured ${new Date(displayedScan.capturedAt).toLocaleDateString("en-US", {
+                      month: "short",
+                      day: "numeric",
+                      year: "numeric"
+                    })}`
+                  : "No completed scan is available yet."}
+              </p>
+            </div>
+            <Link className="button button-quiet button-small" href="/scan/new">
+              View scan <ArrowRight size={16} />
+            </Link>
+          </div>
+          {displayedConcerns.length > 0 ? (
+            <div className="acne-concern-list">
+              {displayedConcerns.map((concern) => {
+                const severity = concern.normalizedSeverity ?? 0;
+                const classification = classifyCosmeticConcern(concern.normalizedSeverity);
+                return (
+                  <article className="acne-concern-row" key={concern.key}>
+                    <div>
+                      <strong>{concern.displayLabel ?? concern.providerLabel}</strong>
+                      <small>{classification.label}</small>
+                    </div>
+                    <div className="acne-concern-meter" aria-label={`${severity} out of 100`}>
+                      <span style={{ width: `${severity}%` }} />
+                    </div>
+                    <strong>{severity}</strong>
+                  </article>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="acne-plan-empty">
+              <ScanFace size={30} />
+              <strong>Add your baseline scan</strong>
+              <p>Skin measurements from the Scan page will appear here automatically.</p>
+            </div>
+          )}
+        </section>
+
+        <div className="acne-plan-side-stack">
+          <section className="panel acne-plan-experiment-card">
+            <div className="panel-header">
+              <div>
+                <p className="eyebrow">Experiment</p>
+                <h2>One planned change</h2>
+              </div>
+              {experimentStatus ? (
+                <span className="status-pill success">
+                  <Check size={13} /> {capitalize(experimentStatus)}
+                </span>
+              ) : null}
+            </div>
+            <div className="acne-plan-change">
+              <span>{experimentAction}</span>
+              <strong>{experimentProductName}</strong>
+              {plannedExperiment?.productMeta ? <small>{plannedExperiment.productMeta}</small> : null}
+            </div>
+            <div className="acne-plan-hypothesis">
+              <small>What you are measuring</small>
+              <p>{experimentHypothesis}</p>
+            </div>
+            {primaryConcernKeys.length > 0 ? (
+              <div className="acne-plan-tags">
+                {primaryConcernKeys.map((key) => (
+                  <span key={key}>{capitalize(key.replaceAll("_", " "))}</span>
+                ))}
+              </div>
+            ) : null}
+            <Link
+              className="button button-secondary button-small"
+              href={experimentDetailId ? `/experiments/${experimentDetailId}` : "/experiments/new"}
+            >
+              {experimentDetailId ? "Open experiment" : "Create experiment"} <ArrowRight size={16} />
+            </Link>
+          </section>
+
+          <section className="panel acne-plan-routine-card">
+            <div className="panel-header">
+              <div>
+                <p className="eyebrow">Routine</p>
+                <h2>Products in this plan</h2>
+              </div>
+              <Link className="button button-quiet button-small" href="/products">Edit</Link>
+            </div>
+            <div className="routine-lock">
+              {products.map((product) => (
+                <div className="lock-row" key={product.id}>
+                  <div>
+                    <strong>{product.name}</strong>
+                    <small>{product.timeOfDay} · {product.cadence}</small>
+                  </div>
+                  <span className={product.active ? "status-pill success" : "status-pill warning"}>
+                    {product.active ? "Active" : "Paused"}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <section className="panel acne-nutrition-plan">
+        <div className="panel-header">
+          <div>
+            <p className="eyebrow">Daily nutrition plan</p>
+            <h2>Simple food and hydration targets</h2>
+            <p>Use these as practical daily serving targets while keeping the experiment routine stable.</p>
+          </div>
+          <span className="status-pill"><CircleDot size={13} /> Daily</span>
+        </div>
+        {nutritionObservation ? (
+          <div className="acne-nutrition-focus">
+            <strong>Experiment nutrition focus</strong>
+            <p>{nutritionObservation}</p>
+          </div>
+        ) : null}
+        <div className="acne-nutrition-grid">
+          {dailyNutritionTargets.map((target) => (
+            <article key={target.food}>
+              <span>{target.amount}</span>
+              <strong>{target.food}</strong>
+              <small>{target.serving}</small>
+            </article>
+          ))}
+        </div>
+        <p className="fine-print">
+          These are general food-serving targets, not acne treatment or individualized nutrition advice.
+          Adjust for allergies, medical needs, climate, and guidance from a qualified professional.
+        </p>
+      </section>
+
+      <details className="panel acne-plan-data-controls">
+        <summary>Data controls</summary>
+        <div>
+          <h3>Delete your data</h3>
+          <p className="muted">Permanently remove your routine, scans, experiments, check-ins, and account data.</p>
+          {!confirmDelete ? (
+            <button
+              className="button button-danger"
+              type="button"
+              onClick={() => {
+                setDeleteError("");
+                setConfirmDelete(true);
+              }}
+            >
+              <Trash2 size={18} /> Delete my data
+            </button>
+          ) : (
+            <div className="callout danger">
+              <strong>This cannot be undone.</strong>
+              <p>Confirm that you want to permanently delete all of your SkinCause data.</p>
+              {deleteError ? <p className="form-error" role="alert">{deleteError}</p> : null}
+              <div className="row-actions" style={{ marginTop: 12 }}>
+                <button
+                  className="button button-danger button-small"
+                  type="button"
+                  disabled={deleteBusy}
+                  onClick={() => void deleteUserData()}
+                >
+                  <Trash2 size={16} /> {deleteBusy ? "Deleting..." : "Permanently delete"}
+                </button>
+                <button
+                  className="button button-secondary button-small"
+                  type="button"
+                  disabled={deleteBusy}
+                  onClick={() => {
+                    setConfirmDelete(false);
+                    setDeleteError("");
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </details>
     </main>
   );
 }
@@ -534,6 +1085,7 @@ export function ScanPage() {
         setResult(resumedResult);
         setActiveConcern(initialConcernKey(resumedResult));
         setStatus("done");
+        window.localStorage.setItem(latestScanResultStorageKey, JSON.stringify(resumedResult));
         window.localStorage.setItem("skincause-latest-scan", activeId);
         window.localStorage.removeItem("skincause-active-scan");
       } catch (resumeError) {
@@ -556,12 +1108,12 @@ export function ScanPage() {
     setError("");
     setStatus("preparing");
     try {
-      const blob = await fetch("/images/demo-face-v3.png")
+      const blob = await fetch("/images/demo-face-acne.png")
       .then((response) => {
         if (!response.ok) throw new Error("The demo image could not be loaded.");
         return response.blob();
       });
-      const file = new File([blob], "skincause-asian-skin-test.png", { type: "image/png" });
+      const file = new File([blob], "skincause-acne-demo.png", { type: "image/png" });
       setSelectedFile(file);
       setPreviewUrl(URL.createObjectURL(file));
       setFileName(file.name);
@@ -722,6 +1274,7 @@ export function ScanPage() {
       setResult(completed);
       setActiveConcern(initialConcernKey(completed));
       setStatus("done");
+      window.localStorage.setItem(latestScanResultStorageKey, JSON.stringify(completed));
       window.localStorage.setItem("skincause-latest-scan", uploadSession.scanId);
       window.localStorage.removeItem("skincause-active-scan");
     } catch (submitError) {
@@ -733,36 +1286,51 @@ export function ScanPage() {
     }
   }
 
+  function resetScan() {
+    setStatus("idle");
+    setError("");
+    setSelectedFile(null);
+    setPreviewUrl("");
+    setFileName("");
+    setUsingDemoImage(false);
+    setCapturedWithCameraKit(false);
+    setResult(null);
+    setActiveConcern(null);
+    setActivity([]);
+  }
+
   return (
     <main className="page-shell" id="main">
       <h1 className="sr-only">Scan</h1>
       <div className="scan-grid">
-        <section className={previewUrl ? "capture-zone has-image" : "capture-zone"}>
-          {previewUrl && status === "done" && result ? (
-            <ConcernVisualization
-              scan={result}
-              imageUrl={previewUrl}
-              activeConcern={activeConcern}
-              onSelectConcern={setActiveConcern}
-            />
-          ) : previewUrl ? (
-            <div
-              className="demo-face-preview"
-              role="img"
-              aria-label={demoMode ? "Prepared synthetic skin-analysis test face" : `Preview of ${fileName}`}
-              style={{ backgroundImage: `url(${previewUrl})` }}
-            />
-          ) : (
-            <div>
-              <div className="face-guide" aria-hidden="true"><Focus size={50} /></div>
-              <p style={{ marginTop: 18, marginBottom: 4 }}><strong>Center your face inside the guide</strong></p>
-              <p className="muted">Face fills 60–80% · even front lighting · neutral expression · eyes open</p>
-            </div>
-          )}
-        </section>
+        <ScanResultsSidebar status={status} result={result} onPlanExperiment={() => router.push("/experiments/new")} />
+        <div className="scan-image-column">
+          <section className={previewUrl ? "capture-zone has-image" : "capture-zone"}>
+            {previewUrl && status === "done" && result ? (
+              <ConcernImage
+                scan={result}
+                imageUrl={previewUrl}
+                activeConcern={activeConcern}
+              />
+            ) : previewUrl ? (
+              <div
+                className="demo-face-preview"
+                role="img"
+                aria-label={demoMode ? "Prepared synthetic skin-analysis test face" : `Preview of ${fileName}`}
+                style={{ backgroundImage: `url(${previewUrl})` }}
+              />
+            ) : (
+              <div>
+                <div className="face-guide" aria-hidden="true"><Focus size={50} /></div>
+                <p style={{ marginTop: 18, marginBottom: 4 }}><strong>Center your face inside the guide</strong></p>
+                <p className="muted">Face fills 60–80% · even front lighting · neutral expression · eyes open</p>
+              </div>
+            )}
+          </section>
+        </div>
         <aside className="scan-instructions">
-          <AnalysisActivity status={status} result={result} activity={activity} />
-          <section className="panel">
+          <AnalysisActivity status={status} activity={activity} />
+          <section className={`panel scan-action-panel scan-action-panel-${status}`}>
             <input
               className="upload-input"
               ref={fileRef}
@@ -772,25 +1340,7 @@ export function ScanPage() {
               aria-label="Choose a JPG or PNG image"
             />
             {status === "idle" ? <YouCamCameraKit onCapture={acceptCameraKitCapture} /> : null}
-            {usingDemoImage && status === "ready" ? (
-              <div className="callout" role="status">
-                <strong>Synthetic test image ready</strong>
-                <p className="muted">This AI-generated portrait is prepared for a live skin-analysis scan.</p>
-              </div>
-            ) : null}
             {error && <div className="callout danger" role="alert" style={{ marginTop: 14 }}>{error}</div>}
-            {(fileName || status === "ready") && !error && (
-              <div className="quality-box" style={{ marginTop: 14 }}>
-                <strong>{fileName || "Resumable scan found"}</strong>
-                <p className="muted">Format, file size, and SD dimensions passed. Final face and lighting checks occur during analysis.</p>
-              </div>
-            )}
-            {status === "idle" ? (
-              <div className="quality-box" style={{ marginTop: 14 }}>
-                <strong>For repeatable measurements</strong>
-                <p className="muted">Use the same camera and lighting each time. Keep hair off your forehead and remove glasses or makeup when practical.</p>
-              </div>
-            ) : null}
             {status === "idle" && (
               <div className="scan-source-actions">
                 <button className="button" onClick={() => fileRef.current?.click()}>
@@ -827,60 +1377,34 @@ export function ScanPage() {
               </div>
             )}
             {status === "done" && (
-              <div aria-live="polite" style={{ marginTop: 18 }}>
-                <div className="quality-box">
-                  <span className={`result-provenance result-provenance-${result?.provider ?? "unknown"}`}>
-                    {result?.provider === "youcam"
-                      ? `Live YouCam ${result.providerVersion ?? "provider"} response`
-                      : "Agent test result"}
-                  </span>
-                  <strong>Scan complete</strong>
-                  <div className="scan-score-list" data-testid="provider-score-summary">
-                    {result ? orderedConcerns(result).map((concern) => {
-                      const assessment = classifyCosmeticConcern(concern.normalizedSeverity);
-                      return (
-                        <div
-                          className={`scan-score-row scan-score-${concern.key}`}
-                          key={concern.key}
-                        >
-                          <ConcernScoreIcon concernKey={concern.key} />
-                          <span className="scan-score-label">{concern.displayLabel ?? concern.providerLabel}</span>
-                          <strong>
-                            {concern.normalizedSeverity === null
-                              ? "n/a"
-                              : Math.round(concern.normalizedSeverity)}
-                          </strong>
-                          <div className={`scan-score-assessment assessment-${assessment.level}`}>
-                            {assessment.label}
-                          </div>
-                        </div>
-                      );
-                    }) : null}
-                  </div>
-                </div>
-                <button className="button" style={{ width: "100%", marginTop: 16 }} onClick={() => router.push("/experiments/new")}>
-                  Plan experiment <ArrowRight size={18} />
-                </button>
-              </div>
+              <button className="button button-secondary scan-again-button" type="button" onClick={resetScan}>
+                <ScanFace size={18} /> Analyze another image
+              </button>
             )}
             {status === "failed" && (
-              <button className="button button-secondary" style={{ width: "100%", marginTop: 16 }} onClick={() => {
-                setStatus("idle");
-                setError("");
-                setSelectedFile(null);
-                setPreviewUrl("");
-                setFileName("");
-                setUsingDemoImage(false);
-                setCapturedWithCameraKit(false);
-                setResult(null);
-                setActiveConcern(null);
-                setActivity([]);
-              }}>
+              <button className="button button-secondary" style={{ width: "100%", marginTop: 16 }} onClick={resetScan}>
                 Try another image
               </button>
             )}
           </section>
         </aside>
+        <section className="panel segmentation-panel">
+          <div className="segmentation-heading">
+            <strong>Facial segmentation</strong>
+            {result ? (
+              <span>{orderedConcerns(result).filter((concern) => concern.maskUrl).length} provider mask overlays</span>
+            ) : null}
+          </div>
+          {status === "done" && result ? (
+            <SegmentationControls
+              scan={result}
+              activeConcern={activeConcern}
+              onSelectConcern={setActiveConcern}
+            />
+          ) : (
+            <p className="segmentation-placeholder">Overlay controls appear here after analysis.</p>
+          )}
+        </section>
       </div>
     </main>
   );
@@ -888,11 +1412,9 @@ export function ScanPage() {
 
 function AnalysisActivity({
   status,
-  result,
   activity
 }: {
   status: ScanWorkflowStatus;
-  result: Scan | null;
   activity: ScanActivityEvent[];
 }) {
   const logRef = useRef<HTMLDivElement>(null);
@@ -903,26 +1425,10 @@ function AnalysisActivity({
     if (log) log.scrollTop = log.scrollHeight;
   }, [activity]);
 
-  const badge = status === "done"
-    ? result?.provider === "youcam" ? "Live YouCam response" : "Agent test mode"
-    : status === "processing"
-      ? "Provider active"
-      : status === "uploading"
-        ? "Uploading"
-        : status === "failed"
-          ? "Failed"
-          : status === "ready"
-            ? "Ready"
-            : "Idle";
-
   return (
     <section className="panel analysis-activity-panel">
       <div className="panel-header">
-        <div>
-          <h2>Live execution log</h2>
-          <p>Sanitized events emitted by this scan.</p>
-        </div>
-        <span className={`status-pill activity-badge activity-badge-${status}`}>{badge}</span>
+        <h2>Live execution log</h2>
       </div>
       <div
         className="analysis-terminal"
@@ -968,91 +1474,154 @@ function AnalysisActivity({
           </div>
         ) : null}
       </div>
-      <p className="analysis-log-safety">
-        Provider credentials, task IDs, image URLs, and authorization headers stay hidden.
-      </p>
     </section>
   );
 }
 
-function ConcernVisualization({
+function ScanResultsSidebar({
+  status,
+  result,
+  onPlanExperiment
+}: {
+  status: ScanWorkflowStatus;
+  result: Scan | null;
+  onPlanExperiment: () => void;
+}) {
+  return (
+    <aside className="panel scan-results-sidebar" aria-label="Scan results">
+      <div className="scan-results-header">
+        <h2>Scan results</h2>
+        {status === "done" && result ? (
+          <span className={`result-provenance result-provenance-${result.provider}`}>
+            {result.provider === "youcam"
+              ? `Live YouCam ${result.providerVersion ?? "provider"}`
+              : "Agent test result"}
+          </span>
+        ) : null}
+      </div>
+      <div className="scan-results-scroll">
+        {status === "done" && result ? (
+          <div className="scan-score-list" data-testid="provider-score-summary">
+            {orderedConcerns(result).map((concern) => {
+              const assessment = classifyCosmeticConcern(concern.normalizedSeverity);
+              return (
+                <div
+                  className={`scan-score-row scan-score-${concern.key}`}
+                  key={concern.key}
+                >
+                  <ConcernScoreIcon concernKey={concern.key} />
+                  <span className="scan-score-label">{concern.displayLabel ?? concern.providerLabel}</span>
+                  <strong>
+                    {concern.normalizedSeverity === null
+                      ? "n/a"
+                      : Math.round(concern.normalizedSeverity)}
+                  </strong>
+                  <div className={`scan-score-assessment assessment-${assessment.level}`}>
+                    {assessment.label}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="scan-results-placeholder">
+            {status === "uploading" || status === "processing"
+              ? "Analyzing image…"
+              : "Scores appear here after analysis."}
+          </p>
+        )}
+      </div>
+      <button
+        className="button scan-results-action"
+        type="button"
+        onClick={onPlanExperiment}
+      >
+        Plan experiment <ArrowRight size={18} />
+      </button>
+    </aside>
+  );
+}
+
+function ConcernImage({
   scan,
   imageUrl,
-  activeConcern,
-  onSelectConcern
+  activeConcern
 }: {
   scan: Scan;
   imageUrl: string;
   activeConcern: string | null;
-  onSelectConcern: (key: string | null) => void;
 }) {
   const active = scan.concerns.find((concern) => concern.key === activeConcern);
   const overlayUrl = active?.maskUrl;
-  const availableConcerns = orderedConcerns(scan).filter((concern) => concern.maskUrl);
 
   return (
-    <div className="concern-visualization">
-      <div className="segmentation-heading">
-        <strong>Facial segmentation</strong>
-        <span>{availableConcerns.length} provider mask overlays</span>
-      </div>
-      <div className="concern-image-stack">
+    <div className="concern-image-stack">
+      <div
+        className="concern-base-image"
+        role="img"
+        aria-label={active
+          ? `${active.displayLabel ?? active.providerLabel} visual pattern overlay on the analyzed image`
+          : "Original analyzed image"}
+        style={{ backgroundImage: `url(${imageUrl})` }}
+      />
+      {overlayUrl ? (
         <div
-          className="concern-base-image"
-          role="img"
-          aria-label={active
-            ? `${active.displayLabel ?? active.providerLabel} visual pattern overlay on the analyzed image`
-            : "Original analyzed image"}
-          style={{ backgroundImage: `url(${imageUrl})` }}
+          className="concern-provider-overlay"
+          aria-hidden="true"
+          style={{ backgroundImage: `url(${overlayUrl})` }}
         />
-        {overlayUrl ? (
-          <div
-            className="concern-provider-overlay"
-            aria-hidden="true"
-            style={{ backgroundImage: `url(${overlayUrl})` }}
-          />
-        ) : null}
-        <span className="concern-visual-label">
-          {active
-            ? `${active.displayLabel ?? active.providerLabel} observed pattern`
-            : "Original image"}
-        </span>
+      ) : null}
+      <span className="concern-visual-label">
+        {active
+          ? `${active.displayLabel ?? active.providerLabel} observed pattern`
+          : "Original image"}
+      </span>
+    </div>
+  );
+}
+
+function SegmentationControls({
+  scan,
+  activeConcern,
+  onSelectConcern
+}: {
+  scan: Scan;
+  activeConcern: string | null;
+  onSelectConcern: (key: string | null) => void;
+}) {
+  const availableConcerns = orderedConcerns(scan).filter((concern) => concern.maskUrl);
+
+  if (availableConcerns.length === 0) {
+    return (
+      <div className="concern-unavailable" role="status">
+        <ImageOff size={18} />
+        <span>Location data was not returned for this scan. Scores remain available.</span>
       </div>
-      {availableConcerns.length > 0 ? (
-        <>
-          <div className="concern-controls" aria-label="Scan image view">
-            <button
-              className={activeConcern === null ? "is-active" : ""}
-              type="button"
-              aria-pressed={activeConcern === null}
-              onClick={() => onSelectConcern(null)}
-            >
-              Original
-            </button>
-            {availableConcerns.map((concern) => (
-              <button
-                className={activeConcern === concern.key ? "is-active" : ""}
-                type="button"
-                aria-pressed={activeConcern === concern.key}
-                key={concern.key}
-                onClick={() => onSelectConcern(concern.key)}
-              >
-                <span className={`concern-swatch concern-swatch-${concern.key}`} aria-hidden="true" />
-                {concern.displayLabel ?? concern.providerLabel}
-              </button>
-            ))}
-          </div>
-          <p className="concern-visual-note">
-            Highlights show AI-observed cosmetic patterns from this scan, not a diagnosis.
-            Provider overlays are temporary and are not retained after this result view.
-          </p>
-        </>
-      ) : (
-        <div className="concern-unavailable" role="status">
-          <ImageOff size={18} />
-          <span>Location data was not returned for this scan. Scores remain available.</span>
-        </div>
-      )}
+    );
+  }
+
+  return (
+    <div className="concern-controls" aria-label="Scan image view">
+      <button
+        className={activeConcern === null ? "is-active" : ""}
+        type="button"
+        aria-pressed={activeConcern === null}
+        onClick={() => onSelectConcern(null)}
+      >
+        Original
+      </button>
+      {availableConcerns.map((concern) => (
+        <button
+          className={activeConcern === concern.key ? "is-active" : ""}
+          type="button"
+          aria-pressed={activeConcern === concern.key}
+          key={concern.key}
+          onClick={() => onSelectConcern(concern.key)}
+        >
+          <span className={`concern-swatch concern-swatch-${concern.key}`} aria-hidden="true" />
+          {concern.displayLabel ?? concern.providerLabel}
+        </button>
+      ))}
     </div>
   );
 }
@@ -1070,6 +1639,8 @@ export function ExperimentPlannerPage() {
   const [hypothesis, setHypothesis] = useState(
     "Observe whether the selected visible patterns change while this one routine step is adjusted."
   );
+  const [includeNutritionObservation, setIncludeNutritionObservation] = useState(false);
+  const [nutritionObservation, setNutritionObservation] = useState("");
   const [appliedRecommendation, setAppliedRecommendation] =
     useState<RoutineRecommendation | null>(null);
   const stagedCandidateIdRef = useRef<string | null>(null);
@@ -1122,6 +1693,10 @@ export function ExperimentPlannerPage() {
     }
 
     setHypothesis(recommendation.summary);
+    setNutritionObservation(
+      `Foods to consider: ${recommendation.nutritionGuidance.foodsToConsider.join(", ")}. ${recommendation.nutritionGuidance.trackingPrompt}`
+    );
+    setIncludeNutritionObservation(true);
     setAppliedRecommendation(recommendation);
     stagedCandidateIdRef.current = null;
     setError("");
@@ -1138,12 +1713,43 @@ export function ExperimentPlannerPage() {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    const primaryConcerns = data.getAll("primaryConcerns").map(String);
+    const selectedNutritionObservation = includeNutritionObservation
+      ? nutritionObservation.trim()
+      : "";
+    const submittedHypothesis = selectedNutritionObservation
+      ? `${hypothesis.trim()}\n\nNutrition context to track: ${selectedNutritionObservation}`
+      : hypothesis.trim();
+
     if (authStatus !== "authenticated") {
+      const candidate = appliedRecommendation?.candidateProduct;
+      const plannedAiExperiment: PlannedAiExperiment = {
+        actionLabel: appliedRecommendation
+          ? recommendationActionLabel(appliedRecommendation.action)
+          : type === "elimination"
+            ? "Suspend product"
+            : "Add or replace product",
+        productName: candidate
+          ? `${candidate.brand} ${candidate.name}`
+          : products.find((product) => product.id === effectiveProductId)?.name ?? null,
+        productMeta: candidate
+          ? [candidate.category, candidate.estimatedPrice, candidate.localAvailability]
+              .filter(Boolean)
+              .join(" · ") || null
+          : null,
+        productUrl: candidate?.productUrl ?? null,
+        nutritionObservation: selectedNutritionObservation || null,
+        measurementKeys: primaryConcerns,
+        hypothesis: submittedHypothesis
+      };
+      window.localStorage.setItem(
+        plannedAiExperimentStorageKey,
+        JSON.stringify(plannedAiExperiment)
+      );
       router.push(`/experiments/${experimentId}`);
       return;
     }
-    const data = new FormData(event.currentTarget);
-    const primaryConcerns = data.getAll("primaryConcerns").map(String);
     if (!baseline || primaryConcerns.length === 0) {
       setError("Choose at least one baseline measurement.");
       return;
@@ -1192,7 +1798,7 @@ export function ExperimentPlannerPage() {
             type,
             suspectProductId,
             startedAt,
-            hypothesis: String(data.get("hypothesis")),
+            hypothesis: submittedHypothesis,
             baselineScanId: baseline.id,
             analysisProfileVersion: baseline.analysisProfileVersion ?? "routine-sd-v1",
             primaryConcerns
@@ -1210,12 +1816,20 @@ export function ExperimentPlannerPage() {
   }
 
   return (
-    <main className="page-shell" id="main">
-      <PageHeading eyebrow="Step 4 of 4" title="Plan one clear change" description="Select one suspect product. Every other routine step becomes a locked snapshot for the duration of the investigation." />
-      <form onSubmit={submit}>
+    <main className="page-shell experiment-planner-page" id="main">
+      <PageHeading
+        title="Plan one clear change"
+        description="Select one suspect product. Every other routine step becomes a locked snapshot for the duration of the investigation."
+        action={
+          <Link className="button button-secondary" href="/scan/new">
+            <ArrowLeft size={18} /> Back to scan
+          </Link>
+        }
+      />
+      <form className="experiment-planner-form" onSubmit={submit}>
         <div className="planner-stack">
-          <section className="panel">
-            <div className="form-grid">
+          <section className="panel planner-workspace-panel">
+            <div className="form-grid planner-fields">
             <div className="field full">
               <span className="field-label">Planned change</span>
               <div className="segmented" style={{ gridTemplateColumns: "repeat(2, 1fr)" }}>
@@ -1235,7 +1849,7 @@ export function ExperimentPlannerPage() {
                 {products.map((product) => <option value={product.id} key={product.id}>{product.name}{product.recentlyChanged ? " · recently changed" : ""}</option>)}
                 {appliedRecommendation?.candidateProduct ? (
                   <option value={aiCandidateProductId}>
-                    AI replacement · {appliedRecommendation.candidateProduct.brand}{" "}
+                    AI {appliedRecommendation.action === "add" ? "addition" : "replacement"} · {appliedRecommendation.candidateProduct.brand}{" "}
                     {appliedRecommendation.candidateProduct.name}
                   </option>
                 ) : null}
@@ -1281,6 +1895,79 @@ export function ExperimentPlannerPage() {
                 required
               />
             </div>
+            {appliedRecommendation ? (
+              <details className="field full ai-applied-plan">
+                <summary className="ai-applied-plan-header">
+                  <div>
+                    <p className="eyebrow"><CheckCircle2 size={13} /> Applied to this experiment</p>
+                    <strong>
+                      {appliedRecommendation.candidateProduct
+                        ? `${appliedRecommendation.candidateProduct.brand} ${appliedRecommendation.candidateProduct.name}`
+                        : recommendationActionLabel(appliedRecommendation.action)}
+                    </strong>
+                  </div>
+                  <span className="status-pill success">Applied</span>
+                </summary>
+                <div className="ai-applied-plan-grid">
+                  <article className="ai-plan-input">
+                    <small>Routine change</small>
+                    <strong>{recommendationActionLabel(appliedRecommendation.action)}</strong>
+                    {appliedRecommendation.existingProductName ? (
+                      <span>Current: {appliedRecommendation.existingProductName}</span>
+                    ) : null}
+                    {appliedRecommendation.candidateProduct ? (
+                      <>
+                        <span>
+                          New: {appliedRecommendation.candidateProduct.brand}{" "}
+                          {appliedRecommendation.candidateProduct.name}
+                        </span>
+                        <span>{appliedRecommendation.candidateProduct.category}</span>
+                        {appliedRecommendation.candidateProduct.estimatedPrice ? (
+                          <span>{appliedRecommendation.candidateProduct.estimatedPrice}</span>
+                        ) : null}
+                        {appliedRecommendation.candidateProduct.localAvailability ? (
+                          <span>{appliedRecommendation.candidateProduct.localAvailability}</span>
+                        ) : null}
+                        {appliedRecommendation.candidateProduct.productUrl ? (
+                          <a
+                            href={appliedRecommendation.candidateProduct.productUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            View product online
+                          </a>
+                        ) : null}
+                      </>
+                    ) : null}
+                    <small>The product selection and measurement checkboxes above were updated automatically.</small>
+                  </article>
+                  <article className="ai-plan-input">
+                    <label className="check-row ai-nutrition-toggle">
+                      <input
+                        type="checkbox"
+                        checked={includeNutritionObservation}
+                        onChange={(event) => setIncludeNutritionObservation(event.target.checked)}
+                      />
+                      <span>Track nutrition context during this experiment</span>
+                    </label>
+                    <textarea
+                      aria-label="Nutrition observation to track"
+                      name="nutritionTrackingPrompt"
+                      value={nutritionObservation}
+                      disabled={!includeNutritionObservation}
+                      onChange={(event) => setNutritionObservation(event.target.value)}
+                    />
+                    <div className="food-suggestion-list" aria-label="Foods suggested by AI">
+                      {appliedRecommendation.nutritionGuidance.foodsToConsider.map((food) => (
+                        <span key={food}>{food}</span>
+                      ))}
+                    </div>
+                    <small>{appliedRecommendation.nutritionGuidance.suggestion}</small>
+                    <small>{appliedRecommendation.nutritionGuidance.evidenceNote}</small>
+                  </article>
+                </div>
+              </details>
+            ) : null}
             </div>
             {evidenceExperimentId ? (
               <ExperimentAiTools
@@ -1289,13 +1976,15 @@ export function ExperimentPlannerPage() {
               />
             ) : (
               <section className="experiment-ai-panel experiment-ai-panel--embedded">
-                <p className="eyebrow"><Sparkles size={13} /> AI-assisted next change</p>
-                <h2>Available after your first completed experiment</h2>
-                <p className="muted">
-                  OpenAI uses recorded experiment evidence to suggest an addition, removal, or
-                  replacement. YouCam needs a retained baseline and comparable follow-up scan to
-                  generate the illustrative after-experiment image.
-                </p>
+                <div className="ai-studio-empty">
+                  <p className="eyebrow"><Sparkles size={13} /> AI-assisted next change</p>
+                  <h2>Available after your first completed experiment</h2>
+                  <p className="muted">
+                    OpenAI uses recorded experiment evidence to suggest an addition, removal, or
+                    replacement. YouCam needs a retained baseline and comparable follow-up scan to
+                    generate the illustrative after-experiment image.
+                  </p>
+                </div>
               </section>
             )}
             <div className="planner-submit">
@@ -1458,6 +2147,43 @@ export function CheckInPage() {
 
 export function ExperimentDetailPage({ id = experimentId }: { id?: string }) {
   const { authStatus, checkInSaved } = useAppState();
+  const [plannedAiExperiment, setPlannedAiExperiment] =
+    useState<PlannedAiExperiment | null>(null);
+
+  useEffect(() => {
+    if (authStatus === "authenticated") return;
+    const stored = window.localStorage.getItem(plannedAiExperimentStorageKey);
+    if (!stored) return;
+    try {
+      const parsed = JSON.parse(stored) as Partial<PlannedAiExperiment>;
+      if (
+        typeof parsed.actionLabel === "string" &&
+        typeof parsed.hypothesis === "string"
+      ) {
+        const nextPlannedExperiment: PlannedAiExperiment = {
+          actionLabel: parsed.actionLabel,
+          hypothesis: parsed.hypothesis,
+          productName: typeof parsed.productName === "string" ? parsed.productName : null,
+          productMeta: typeof parsed.productMeta === "string" ? parsed.productMeta : null,
+          productUrl: typeof parsed.productUrl === "string" ? parsed.productUrl : null,
+          nutritionObservation:
+            typeof parsed.nutritionObservation === "string"
+              ? parsed.nutritionObservation
+              : null,
+          measurementKeys: Array.isArray(parsed.measurementKeys)
+            ? parsed.measurementKeys.filter((key): key is string => typeof key === "string")
+            : undefined
+        };
+        const timer = window.setTimeout(() => {
+          setPlannedAiExperiment(nextPlannedExperiment);
+        }, 0);
+        return () => window.clearTimeout(timer);
+      }
+    } catch {
+      window.localStorage.removeItem(plannedAiExperimentStorageKey);
+    }
+  }, [authStatus]);
+
   if (authStatus === "authenticated") {
     return <AuthenticatedExperimentDetail id={id} />;
   }
@@ -1507,6 +2233,32 @@ export function ExperimentDetailPage({ id = experimentId }: { id?: string }) {
               View result <ArrowRight size={18} />
             </Link>
           </section>
+          {plannedAiExperiment ? (
+            <section className="panel">
+              <p className="eyebrow"><Sparkles size={13} /> Applied AI plan</p>
+              <h3>{plannedAiExperiment.actionLabel}</h3>
+              {plannedAiExperiment.productName ? (
+                <div className="candidate-product">
+                  <small>Selected product</small>
+                  <strong>{plannedAiExperiment.productName}</strong>
+                  {plannedAiExperiment.productMeta ? (
+                    <span>{plannedAiExperiment.productMeta}</span>
+                  ) : null}
+                  {plannedAiExperiment.productUrl ? (
+                    <a href={plannedAiExperiment.productUrl} target="_blank" rel="noreferrer">
+                      View product online
+                    </a>
+                  ) : null}
+                </div>
+              ) : null}
+              {plannedAiExperiment.nutritionObservation ? (
+                <div className="ai-detail-nutrition">
+                  <small>Nutrition context to track</small>
+                  <p>{plannedAiExperiment.nutritionObservation}</p>
+                </div>
+              ) : null}
+            </section>
+          ) : null}
           <section className="panel">
             <h3>Known limitation</h3>
             <p className="muted">The Jun 18 check-in included unusual sun exposure, reducing confidence by eight points.</p>
@@ -1538,10 +2290,13 @@ function ExperimentAiTools({
   const [recommendation, setRecommendation] = useState<RoutineRecommendation | null>(null);
   const [simulation, setSimulation] = useState<SkinSimulation | null>(null);
   const [simulationBlobUrl, setSimulationBlobUrl] = useState("");
+  const [simulationSourceBlobUrl, setSimulationSourceBlobUrl] = useState("");
+  const [comparisonPosition, setComparisonPosition] = useState(50);
   const [recommendationBusy, setRecommendationBusy] = useState(false);
   const [simulationBusy, setSimulationBusy] = useState(false);
   const [recommendationError, setRecommendationError] = useState("");
   const [simulationError, setSimulationError] = useState("");
+  const [activeStudioTab, setActiveStudioTab] = useState<"plan" | "simulation">("plan");
 
   useEffect(() => {
     let active = true;
@@ -1613,7 +2368,42 @@ function ExperimentAiTools({
     };
   }, [apiFetch, simulation]);
 
+  useEffect(() => {
+    if (
+      authStatus !== "authenticated" ||
+      simulation?.status !== "succeeded" ||
+      !simulation.sourceScanId
+    ) return;
+    let active = true;
+    let objectUrl = "";
+    void apiFetch(
+      `/api/v1/scans/${encodeURIComponent(simulation.sourceScanId)}/image`,
+      { cache: "no-store" }
+    )
+      .then(async (response) => {
+        if (!response.ok) throw new Error("The baseline image could not be loaded.");
+        return response.blob();
+      })
+      .then((blob) => {
+        if (!active) return;
+        objectUrl = URL.createObjectURL(blob);
+        setSimulationSourceBlobUrl(objectUrl);
+      })
+      .catch((imageError: unknown) => {
+        if (active) {
+          setSimulationError(
+            imageError instanceof Error ? imageError.message : "The baseline image is unavailable."
+          );
+        }
+      });
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [apiFetch, authStatus, simulation?.sourceScanId, simulation?.status]);
+
   async function generateRecommendation() {
+    setActiveStudioTab("plan");
     setRecommendationBusy(true);
     setRecommendationError("");
     try {
@@ -1634,11 +2424,14 @@ function ExperimentAiTools({
   }
 
   async function generateSimulation() {
+    setActiveStudioTab("simulation");
     const regenerate = simulation?.status === "succeeded";
     setSimulationBusy(true);
     setSimulationError("");
     setSimulation(null);
     setSimulationBlobUrl("");
+    setSimulationSourceBlobUrl("");
+    setComparisonPosition(50);
     try {
       if (regenerate) {
         const deleted = await apiFetch(
@@ -1676,6 +2469,7 @@ function ExperimentAiTools({
       await readApiResponse(response);
       setSimulation(null);
       setSimulationBlobUrl("");
+      setSimulationSourceBlobUrl("");
     } catch (error) {
       setSimulationError(
         error instanceof Error ? error.message : "The generated image could not be deleted."
@@ -1689,25 +2483,53 @@ function ExperimentAiTools({
     simulation?.status === "succeeded" && simulation.imageUrl?.startsWith("/images/")
       ? simulation.imageUrl
       : simulationBlobUrl;
+  const simulationSourceImage =
+    authStatus === "guest" || authStatus === "demo"
+      ? "/images/demo-face-acne.png"
+      : simulationSourceBlobUrl;
 
   return (
     <section className="experiment-ai-panel experiment-ai-panel--embedded">
-      <div className="panel-header">
+      <div className="panel-header ai-studio-heading">
         <div>
           <p className="eyebrow"><Sparkles size={13} /> AI experiment studio</p>
-          <h2>Use prior evidence to plan this one change</h2>
-          <p>
-            OpenAI may suggest an addition, removal, or replacement. The YouCam result illustrates
-            the recorded experiment outcome and expires after 24 hours.
-          </p>
+          <h2>Product, food, and simulation</h2>
+          <p>Build one sourced change, then preview its illustrative measurement goal.</p>
         </div>
       </div>
+      <div className="ai-studio-tabs" role="tablist" aria-label="AI experiment studio views">
+        <button
+          className={activeStudioTab === "plan" ? "is-active" : ""}
+          type="button"
+          role="tab"
+          aria-selected={activeStudioTab === "plan"}
+          aria-controls="ai-plan-panel"
+          onClick={() => setActiveStudioTab("plan")}
+        >
+          <ListRestart size={16} /> Product + nutrition
+        </button>
+        <button
+          className={activeStudioTab === "simulation" ? "is-active" : ""}
+          type="button"
+          role="tab"
+          aria-selected={activeStudioTab === "simulation"}
+          aria-controls="ai-simulation-panel"
+          onClick={() => setActiveStudioTab("simulation")}
+        >
+          <ScanFace size={16} /> Skin simulation
+        </button>
+      </div>
       <div className="experiment-ai-grid">
-        <article className="ai-tool-card">
+        <article
+          className="ai-tool-card"
+          id="ai-plan-panel"
+          role="tabpanel"
+          hidden={activeStudioTab !== "plan"}
+        >
           <div className="ai-tool-heading">
             <div>
               <span className="status-pill">OpenAI</span>
-              <h3>Routine suggestion</h3>
+              <h3>Affordable product guidance</h3>
             </div>
             <ListRestart size={22} />
           </div>
@@ -1726,37 +2548,64 @@ function ExperimentAiTools({
                     {recommendation.candidateProduct.name}
                   </strong>
                   <span>{recommendation.candidateProduct.category}</span>
+                  {recommendation.candidateProduct.estimatedPrice ? (
+                    <span><strong>Price:</strong> {recommendation.candidateProduct.estimatedPrice}</span>
+                  ) : null}
+                  {recommendation.candidateProduct.localAvailability ? (
+                    <span><strong>Availability:</strong> {recommendation.candidateProduct.localAvailability}</span>
+                  ) : null}
+                  {recommendation.candidateProduct.affordabilityNote ? (
+                    <span>{recommendation.candidateProduct.affordabilityNote}</span>
+                  ) : null}
                   {recommendation.candidateProduct.productUrl ? (
                     <a
                       href={recommendation.candidateProduct.productUrl}
                       target="_blank"
                       rel="noreferrer"
                     >
-                      Verify product source
+                      View product online
                     </a>
                   ) : null}
                 </div>
               ) : null}
-              <ul className="compact-list">
-                {recommendation.rationale.map((item) => <li key={item}>{item}</li>)}
-              </ul>
-              {recommendation.sources.length > 0 ? (
-                <div className="recommendation-sources">
-                  <small>Web sources</small>
-                  {recommendation.sources.map((source) => (
-                    <a key={source.url} href={source.url} target="_blank" rel="noreferrer">
-                      {source.title}
-                    </a>
+              <div className="callout compact">
+                <p className="eyebrow">Foods to consider · {recommendation.nutritionGuidance.focus}</p>
+                <p><strong>{recommendation.nutritionGuidance.suggestion}</strong></p>
+                <div className="food-suggestion-list" aria-label="Foods suggested by AI">
+                  {recommendation.nutritionGuidance.foodsToConsider.map((food) => (
+                    <span key={food}>{food}</span>
                   ))}
                 </div>
-              ) : null}
-              <p className="callout compact">{recommendation.uncertainty}</p>
-              <p className="fine-print">{recommendation.disclaimer}</p>
+                <p className="muted">{recommendation.nutritionGuidance.evidenceNote}</p>
+                <p className="fine-print">{recommendation.nutritionGuidance.trackingPrompt}</p>
+              </div>
+              <details className="ai-evidence-details">
+                <summary>Evidence, sources, and safety</summary>
+                <div className="ai-evidence-details-body">
+                  <ul className="compact-list">
+                    {[...recommendation.rationale, ...recommendation.evidence].map((item, index) => (
+                      <li key={`${index}-${item}`}>{item}</li>
+                    ))}
+                  </ul>
+                  {recommendation.sources.length > 0 ? (
+                    <div className="recommendation-sources">
+                      <small>Verified sources</small>
+                      {recommendation.sources.map((source) => (
+                        <a key={source.url} href={source.url} target="_blank" rel="noreferrer">
+                          {source.title}
+                        </a>
+                      ))}
+                    </div>
+                  ) : null}
+                  <p className="callout compact">{recommendation.uncertainty}</p>
+                  <p className="fine-print">{recommendation.disclaimer}</p>
+                </div>
+              </details>
             </>
           ) : (
             <p className="muted">
-              Generate one add, remove, replace, or keep suggestion using experiment evidence and
-              current web product information.
+              Generate one acne-focused add, remove, replace, or keep suggestion using experiment
+              evidence, a $25 demo budget, local availability, and sourced nutrition context.
             </p>
           )}
           {recommendationError ? (
@@ -1775,24 +2624,66 @@ function ExperimentAiTools({
           </button>
         </article>
 
-        <article className="ai-tool-card">
+        <article
+          className="ai-tool-card"
+          id="ai-simulation-panel"
+          role="tabpanel"
+          hidden={activeStudioTab !== "simulation"}
+        >
           <div className="ai-tool-heading">
             <div>
               <span className="status-pill">YouCam simulation</span>
-              <h3>Illustrative improvement from recorded change</h3>
+              <h3>Illustrative acne-pattern goal</h3>
             </div>
             <ScanFace size={22} />
           </div>
-          {simulationImage ? (
-            <div className="simulation-result">
-              <NextImage
-                src={simulationImage}
-                alt="AI-generated illustrative skin appearance based on recorded cosmetic measurements"
-                width={640}
-                height={640}
-                unoptimized
-              />
-              <span className="simulation-label">AI-generated illustration</span>
+          {simulationImage && simulationSourceImage ? (
+            <>
+              <div
+                className="simulation-comparison"
+                style={{
+                  "--comparison-position": `${comparisonPosition}%`
+                } as React.CSSProperties}
+              >
+                <NextImage
+                  className="simulation-comparison-image"
+                  src={simulationSourceImage}
+                  alt="Skin appearance before the illustrative simulation"
+                  width={640}
+                  height={640}
+                  unoptimized
+                />
+                <div className="simulation-comparison-after" aria-hidden="true">
+                  <NextImage
+                    className="simulation-comparison-image"
+                    src={simulationImage}
+                    alt=""
+                    width={640}
+                    height={640}
+                    unoptimized
+                  />
+                </div>
+                <span className="simulation-comparison-label is-after">After</span>
+                <span className="simulation-comparison-label is-before">Before</span>
+                <span className="simulation-comparison-divider" aria-hidden="true">
+                  <span />
+                </span>
+                <input
+                  className="simulation-comparison-range"
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={comparisonPosition}
+                  aria-label="Compare skin appearance before and after the illustrative simulation"
+                  onChange={(event) => setComparisonPosition(Number(event.target.value))}
+                />
+              </div>
+              <p className="simulation-comparison-help">Drag the slider to compare before and after.</p>
+            </>
+          ) : simulationImage ? (
+            <div className="simulation-loading" role="status">
+              <span className="spinner" />
+              <p>Preparing the before-and-after comparison...</p>
             </div>
           ) : simulation?.status === "queued" || simulation?.status === "processing" ? (
             <div className="simulation-loading" role="status">
@@ -1801,8 +2692,8 @@ function ExperimentAiTools({
             </div>
           ) : (
             <p className="muted">
-              Uses the retained baseline image and latest follow-up measurements. It does not
-              predict what a product will do.
+              Uses the retained baseline image and selected acne-related measurement changes. It
+              does not predict what a product, food, or routine will do.
             </p>
           )}
           {simulation?.expiresAt && simulation.status === "succeeded" ? (
@@ -2071,116 +2962,20 @@ export function ResultsPage({ id = experimentId }: { id?: string }) {
   );
 }
 
-export function PrivacyPage() {
-  const router = useRouter();
-  const {
-    apiFetch,
-    authStatus,
-    retainImages,
-    setRetainImages,
-    deletedImageIds,
-    deleteImage,
-    reset,
-    signOut
-  } = useAppState();
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const [deleteError, setDeleteError] = useState("");
-  const retainedScans = scans.slice(0, 3);
-
-  async function deleteWorkspace() {
-    setDeleteError("");
-    try {
-      if (authStatus === "authenticated") {
-        await readApiResponse(await apiFetch("/api/v1/account", { method: "DELETE" }));
-        await signOut().catch(() => undefined);
-      }
-      reset();
-      window.localStorage.removeItem("skincause-active-scan");
-      window.localStorage.removeItem("skincause-latest-scan");
-      window.localStorage.removeItem("skincause-active-experiment");
-      router.push("/");
-    } catch (error) {
-      setDeleteError(error instanceof Error ? error.message : "The workspace could not be deleted.");
-    }
-  }
-
-  return (
-    <main className="page-shell" id="main">
-      <h1 className="sr-only">Privacy</h1>
-      <div className="dashboard-grid">
-        <div>
-          <section className="panel">
-            <div className="privacy-row">
-              <div><h2>Original image retention</h2><p className="muted">When off, originals are removed after normalized measurements are ready.</p></div>
-              <button type="button" role="switch" className="toggle" aria-label="Retain original images" aria-checked={retainImages} onClick={() => setRetainImages(!retainImages)} />
-            </div>
-          </section>
-          <section className="panel">
-            <div className="panel-header"><div><h2>Original scan images</h2><p>Synthetic records for the demo workspace.</p></div><span className="status-pill">{retainedScans.length - deletedImageIds.length} retained</span></div>
-            <div className="image-list">
-              {retainedScans.map((scan, index) => {
-                const deleted = deletedImageIds.includes(scan.id);
-                return (
-                  <article className="image-record" key={scan.id}>
-                    <div className="image-placeholder">{deleted ? <ImageOff size={32} /> : <ScanFace size={32} />}</div>
-                    <strong>{index === 0 ? "Baseline" : `Follow-up ${index}`}</strong>
-                    <p className="muted">{new Date(scan.capturedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</p>
-                    {deleted ? (
-                      <span className="status-pill"><Check size={13} /> Original deleted</span>
-                    ) : (
-                      <button className="button button-danger button-small" onClick={() => deleteImage(scan.id)}><Trash2 size={16} /> Delete image</button>
-                    )}
-                  </article>
-                );
-              })}
-            </div>
-            <p className="muted" style={{ marginTop: 14 }}>Normalized scores remain available in the experiment timeline after image deletion.</p>
-          </section>
-        </div>
-        <aside>
-          <section className="panel">
-            <p className="eyebrow">Portable copy</p>
-            <h2>Export investigation</h2>
-            <p>Download the seeded routine, check-ins, measurements, result, and limitations as JSON.</p>
-            <Link className="button button-secondary" href={`/api/v1/experiments/${experimentId}/export`}><Download size={18} /> Open export</Link>
-          </section>
-          <section className="panel">
-            <p className="eyebrow">Full deletion</p>
-            <h2>Delete this workspace</h2>
-            <p>Remove the local consent, routine changes, scan references, check-ins, and privacy settings.</p>
-            {!confirmDelete ? (
-              <button className="button button-danger" onClick={() => setConfirmDelete(true)}><Trash2 size={18} /> Delete workspace</button>
-            ) : (
-              <div className="callout danger">
-                <strong>This cannot be undone.</strong>
-                {deleteError ? <p className="form-error" role="alert">{deleteError}</p> : null}
-                <div className="row-actions" style={{ marginTop: 12 }}>
-                  <button className="button button-danger button-small" onClick={() => void deleteWorkspace()}><Check size={16} /> Confirm</button>
-                  <button className="button button-secondary button-small" onClick={() => setConfirmDelete(false)}><XCircle size={16} /> Cancel</button>
-                </div>
-              </div>
-            )}
-          </section>
-        </aside>
-      </div>
-    </main>
-  );
-}
-
 function PageHeading({
   eyebrow,
   title,
   description,
   action
 }: {
-  eyebrow: string;
+  eyebrow?: string;
   title: string;
   description: string;
   action?: React.ReactNode;
 }) {
   return (
     <div className="page-heading">
-      <div><p className="eyebrow">{eyebrow}</p><h1>{title}</h1><p>{description}</p></div>
+      <div>{eyebrow ? <p className="eyebrow">{eyebrow}</p> : null}<h1>{title}</h1><p>{description}</p></div>
       {action}
     </div>
   );

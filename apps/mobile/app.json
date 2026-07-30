@@ -1,0 +1,29 @@
+{
+  "expo": {
+    "name": "SkinCause",
+    "slug": "skincause",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "skincause",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "android": {
+      "package": "com.skincause.demo",
+      "permissions": ["CAMERA"]
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "SkinCause uses a selected image only to run the requested cosmetic scan.",
+          "cameraPermission": "SkinCause uses the camera only to capture the requested cosmetic scan."
+        }
+      ],
+      "expo-secure-store"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

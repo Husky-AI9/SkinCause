@@ -1,4 +1,10 @@
-import { routineRecommendationDisclaimer, products, seededExperiment } from "@skincause/domain";
+import {
+  acneNutritionGuardrails,
+  defaultAcneGuidancePreferences,
+  routineRecommendationDisclaimer,
+  products,
+  seededExperiment
+} from "@skincause/domain";
 import {
   MockRoutineRecommendationProvider,
   success,
@@ -44,7 +50,7 @@ export async function POST(
           status: seededExperiment.status,
           suspectProductId: seededExperiment.suspectProductId,
           suspectProductName: "Brightening Serum",
-          primaryConcerns: ["redness", "texture"],
+          primaryConcerns: ["blemish_pattern", "redness", "texture"],
           result: seededExperiment.result
         },
         products: products.map(({ id: productId, name, category, active, recentlyChanged }) => ({
@@ -53,7 +59,13 @@ export async function POST(
           category,
           active,
           recentlyChanged
-        }))
+        })),
+        guidancePreferences: {
+          market: defaultAcneGuidancePreferences.market,
+          maxUnitPriceUsd: defaultAcneGuidancePreferences.maxUnitPriceUsd,
+          priorities: [...defaultAcneGuidancePreferences.priorities],
+          nutritionGuardrails: [...acneNutritionGuardrails]
+        }
       };
       const generated = await provider.generate({
         context: guestContext

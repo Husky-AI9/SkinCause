@@ -52,7 +52,7 @@ export async function POST(
     const actor = await resolveRequestActor(request);
     if (actor.kind === "guest") {
       if (process.env.YOUCAM_MOCK_MODE === "false") {
-        const sourceImageUrl = new URL("/images/demo-face-v3.png", request.url).toString();
+        const sourceImageUrl = new URL("/images/demo-face-acne.png", request.url).toString();
         return Response.json(success(await startGuestSkinSimulation(id, sourceImageUrl)));
       }
       const now = new Date();

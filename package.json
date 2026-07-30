@@ -18,7 +18,8 @@
     "openapi:generate": "node scripts/generate-openapi.mjs",
     "openapi:check": "node scripts/check-openapi.mjs",
     "test:contracts": "vitest run tests/contracts",
-    "mobile:typecheck": "npm --workspace @skincause/mobile run typecheck"
+    "mobile:typecheck": "npm --workspace @skincause/mobile run typecheck",
+    "mobile:android": "npm --workspace @skincause/mobile run android"
   },
   "devDependencies": {
     "@playwright/test": "^1.54.2",

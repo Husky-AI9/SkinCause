@@ -9,7 +9,6 @@ import {
   LogOut,
   Menu,
   ScanFace,
-  ShieldCheck,
   X
 } from "lucide-react";
 import Link from "next/link";
@@ -18,11 +17,10 @@ import { useState } from "react";
 import { useAppState } from "./app-provider";
 
 const navItems = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/products", label: "Routine", icon: BookOpenText },
+  { href: "/dashboard", label: "Acne plan", icon: LayoutDashboard },
   { href: "/scan/new", label: "Scan", icon: ScanFace },
-  { href: "/experiments/brightening-serum-elimination", label: "Experiment", icon: FlaskConical },
-  { href: "/privacy", label: "Privacy", icon: ShieldCheck }
+  { href: "/experiments/new", label: "Experiment", icon: FlaskConical },
+  { href: "/products", label: "Products", icon: BookOpenText }
 ];
 
 function SkinCauseMark() {
@@ -161,7 +159,6 @@ export function SafetyFooter() {
         </div>
         {hasWorkspace ? (
           <nav aria-label="Footer navigation">
-            <Link href="/privacy">Privacy center</Link>
             <Link href="/results/brightening-serum-elimination">Demo result</Link>
             <Link href="/api/v1/me">API status</Link>
           </nav>

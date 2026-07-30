@@ -159,12 +159,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!client) return;
     const { error } = await client.auth.signOut();
     if (error) throw new Error(error.message);
+    window.localStorage.removeItem("skincause-latest-scan-result");
+    window.localStorage.removeItem("skincause-planned-ai-experiment");
   }, []);
 
   const enterDemo = useCallback(async () => {
     window.localStorage.removeItem("skincause-active-scan");
     window.localStorage.removeItem("skincause-latest-scan");
     window.localStorage.removeItem("skincause-active-experiment");
+    window.localStorage.removeItem("skincause-latest-scan-result");
+    window.localStorage.removeItem("skincause-planned-ai-experiment");
     setState({ ...initialState, consented: true });
     const client = getSupabaseBrowserClient();
     if (!client) {
@@ -212,6 +216,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     window.localStorage.removeItem("skincause-active-scan");
     window.localStorage.removeItem("skincause-latest-scan");
     window.localStorage.removeItem("skincause-active-experiment");
+    window.localStorage.removeItem("skincause-latest-scan-result");
+    window.localStorage.removeItem("skincause-planned-ai-experiment");
     const client = getSupabaseBrowserClient();
     if (client) {
       const { data } = await client.auth.getSession();

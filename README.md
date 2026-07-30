@@ -1,12 +1,36 @@
 # SkinCause
 
-SkinCause is a privacy-first skincare routine debugger. It turns repeated skin measurements, routine history, adherence, and confounders into a controlled N-of-1 experiment. It organizes cosmetic observations and reports an explainable association estimate; it does not diagnose or claim causation.
+## Android demo
+
+SkinCause now includes an Expo Android client in `apps/mobile`. It uses the same
+server API and Supabase anonymous-demo flow as the web app; API credentials for
+YouCam and OpenAI remain server-side.
+
+1. Install Android Studio and create/start an Android emulator.
+2. Copy `apps/mobile/.env.example` to `apps/mobile/.env` and set the deployed
+   API and Supabase public values.
+3. Install workspace packages, then launch the emulator build:
+
+   ```powershell
+   npx.cmd pnpm@10.14.0 install
+   npm.cmd run mobile:android
+   ```
+
+For a device or emulator that cannot reach the deployed API, use an accessible
+API URL in `EXPO_PUBLIC_API_BASE_URL`. `10.0.2.2` is the Android-emulator alias
+for a server running on the host machine.
+
+SkinCause is a privacy-first, acne-focused skincare guidance app. YouCam measures
+visible acne-related cosmetic patterns, OpenAI organizes one affordable product
+action plus conservative nutrition context, and YouCam Skin Simulation creates
+an illustrative experiment goal. Repeated scans and one-change experiments show
+what happens afterward without claiming diagnosis, treatment, or causation.
 
 ## Run locally
 
-```bash
-npm install
-npm run dev
+```powershell
+npx.cmd pnpm@10.14.0 install --frozen-lockfile
+npm.cmd run dev
 ```
 
 Open `http://localhost:3000`. Mock mode is enabled by default, so the full seeded journey works without Supabase or YouCam credentials.
@@ -14,7 +38,7 @@ Open `http://localhost:3000`. Mock mode is enabled by default, so the full seede
 ## Architecture
 
 - `apps/web`: Next.js App Router UI and thin `/api/v1` transport handlers
-- `apps/mobile`: portable Expo proof-shell types and adapters
+- `apps/mobile`: Expo Router Android/iOS client using the shared API and domain packages
 - `packages/contracts`: Zod API DTOs and envelopes
 - `packages/api-client`: fetch-based client usable by web and React Native
 - `packages/domain`: product policy, seeded story, wording, and error mapping

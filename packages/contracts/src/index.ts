@@ -138,7 +138,10 @@ export const routineRecommendationSchema = z.object({
     name: z.string().min(1).max(200),
     brand: z.string().min(1).max(120),
     category: z.string().min(1).max(120),
-    productUrl: z.string().url().regex(/^https:\/\//i).nullable()
+    productUrl: z.string().url().regex(/^https:\/\//i).nullable(),
+    estimatedPrice: z.string().min(1).max(80).nullable().default(null),
+    localAvailability: z.string().min(1).max(200).nullable().default(null),
+    affordabilityNote: z.string().min(1).max(300).nullable().default(null)
   }).nullable(),
   summary: z.string().min(1).max(500),
   rationale: z.array(z.string().min(1).max(300)).max(3),
@@ -148,6 +151,23 @@ export const routineRecommendationSchema = z.object({
     title: z.string().min(1).max(300),
     url: z.string().url().regex(/^https:\/\//i)
   })).max(8),
+  nutritionGuidance: z.object({
+    focus: z.string().min(1).max(120),
+    suggestion: z.string().min(1).max(400),
+    foodsToConsider: z.array(z.string().min(1).max(120)).min(1).max(4).default([
+      "Fresh vegetables",
+      "Beans or lentils",
+      "Steel-cut oats"
+    ]),
+    evidenceNote: z.string().min(1).max(400),
+    trackingPrompt: z.string().min(1).max(300)
+  }).default({
+    focus: "Nutrition context",
+    suggestion: "Keep meals consistent while observing skin changes.",
+    foodsToConsider: ["Fresh vegetables", "Beans or lentils", "Steel-cut oats"],
+    evidenceNote: "Food and acne relationships vary, and nutrition alone does not explain a visible acne pattern.",
+    trackingPrompt: "Record major diet changes as experiment context rather than assuming causation."
+  }),
   uncertainty: z.string().min(1).max(500),
   disclaimer: z.string().min(1).max(500)
 });

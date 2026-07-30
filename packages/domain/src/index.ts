@@ -12,10 +12,27 @@ export const persistentDisclaimer =
   "SkinCause provides cosmetic tracking and organizational insights, not medical diagnosis or treatment. Results may be affected by lighting, camera quality, routine adherence, time, and other changes.";
 
 export const routineRecommendationDisclaimer =
-  "AI routine suggestions organize experiment evidence and web product information. They are not medical advice, do not establish product safety or suitability, and never change your routine automatically.";
+  "AI guidance organizes acne-related cosmetic measurements, experiment evidence, current product information, and conservative nutrition context. It is not medical advice, does not establish product safety or suitability, and never changes your routine automatically. Verify current price and local availability.";
 
 export const skinSimulationDisclaimer =
-  "This is an AI-generated illustration based on selected cosmetic measurements, not a prediction, diagnosis, treatment result, or guarantee of how skin will change.";
+  "This is an AI-generated illustration based on selected cosmetic measurement changes, not a prediction, diagnosis, treatment result, or guarantee that a product will change your skin.";
+
+export const defaultAcneGuidancePreferences = {
+  market: "United States",
+  maxUnitPriceUsd: 25,
+  priorities: [
+    "widely available at a pharmacy, mass retailer, or major online retailer",
+    "price at or below the target when a current source can verify it",
+    "non-comedogenic or oil-free labeling only when a source verifies the claim"
+  ]
+} as const;
+
+export const acneNutritionGuardrails = [
+  "Offer one optional observation or balanced-food habit, not a restrictive diet.",
+  "Do not recommend supplements, fasting, or removing a food group.",
+  "Describe diet evidence as possible and mixed, not causal.",
+  "Do not imply that nutrition replaces acne care from a qualified professional."
+] as const;
 
 export type CosmeticConcernLevel = "mild" | "moderate" | "elevated" | "unavailable";
 
@@ -323,7 +340,7 @@ export const seededResult = calculateAssociation({
     confounderPenalty: 8,
     qualityPenalty: 2
   },
-  usedConcerns: ["redness", "texture"],
+  usedConcerns: ["blemish_pattern", "redness", "texture"],
   limitations: [
     "One check-in included unusual sun exposure.",
     "Camera and lighting differences can affect measured skin scores."
@@ -350,13 +367,13 @@ export const insufficientResult = calculateAssociation({
 
 export const seededExperiment = {
   id: "brightening-serum-elimination",
-  name: "Brightening serum elimination",
+  name: "Acne-pattern routine experiment",
   type: "elimination" as const,
   status: "completed" as const,
   startedAt: "2026-06-09T08:00:00.000Z",
   endedAt: "2026-06-24T08:00:00.000Z",
   suspectProductId: "brightening-serum",
-  hypothesis: "Observe whether redness and texture change while the serum is paused.",
+  hypothesis: "Observe whether visible acne, redness, and texture signals change while the serum is paused.",
   checkIns: [
     { id: "checkin-1", date: "Jun 13", day: 4, adherence: 100, observation: 7, confounder: null, scanId: "scan-followup-1" },
     { id: "checkin-2", date: "Jun 18", day: 9, adherence: 100, observation: 5, confounder: "Unusual sun exposure", scanId: "scan-followup-2" },
