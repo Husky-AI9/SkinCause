@@ -26,6 +26,13 @@ action plus conservative nutrition context, and YouCam Skin Simulation creates
 an illustrative experiment goal. Repeated scans and one-change experiments show
 what happens afterward without claiming diagnosis, treatment, or causation.
 
+The judge-facing demo uses one synthetic acne-visible portrait throughout the
+scan, segmentation, experiment evidence card, and before/after simulation. The
+evidence card keeps capture readiness, the single planned change, locked
+measurements, price/size/unit cost, source-check date, protocol, and score deltas
+visible in one place. Food ideas are queued for a separate observation so a
+product experiment never changes multiple variables at once.
+
 ## Run locally
 
 ```powershell
@@ -94,13 +101,14 @@ YOUCAM_MAX_IMAGE_BYTES=10000000
 OPENAI_API_KEY=...
 OPENAI_API_BASE_URL=https://api.openai.com/v1
 OPENAI_RECOMMENDATION_MODEL=gpt-5.6-sol
+OPENAI_ACNE_ASSESSMENT_MODEL=gpt-5.6-sol
 OPENAI_MOCK_MODE=false
 ```
 
-Use `YOUCAM_MOCK_MODE=true` and `OPENAI_MOCK_MODE=true` in Vercel Preview unless a preview deployment is intentionally validating paid providers. `YOUCAM_API_KEY_SECRET` is not consumed by the current server adapter and is not required in Vercel. OpenAI receives structured experiment measurements and routine product metadata, not scan images or raw check-in notes.
+Use `YOUCAM_MOCK_MODE=true` and `OPENAI_MOCK_MODE=true` in Vercel Preview unless a preview deployment is intentionally validating paid providers. `YOUCAM_API_KEY_SECRET` is not consumed by the current server adapter and is not required in Vercel. OpenAI receives normalized YouCam measurements for the visible acne-pattern assessment, plus structured experiment measurements and routine product metadata for recommendations. It does not receive scan images or raw check-in notes.
 
 After deployment, run the Playwright smoke journey against the deployment URL and verify sign-in, anonymous demo entry, direct image upload, scan completion, image deletion, and account deletion.
 
 ## Safety
 
-SkinCause provides cosmetic tracking and organizational insights, not medical diagnosis or treatment. Original images are not retained by default. Derived concern scores can be kept for trends and deleted independently through the Privacy Center.
+SkinCause provides cosmetic tracking and organizational insights, not medical diagnosis or treatment. Original images are not retained by default. Derived concern scores can be kept for trends, and the user can delete their data from the Acne plan.

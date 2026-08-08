@@ -15,7 +15,7 @@ test("uploads a real face image and renders live YouCam results", async ({ page 
   await expect(page).toHaveURL(/scan\/new/);
   await expect(page.getByRole("button", { name: "Upload your image" })).toBeEnabled();
   await page.getByLabel("Choose a JPG or PNG image").setInputFiles(faceImage);
-  await expect(page.getByText("asian-skin-test-v3.png", { exact: true })).toBeVisible();
+  await expect(page.getByText(/\[client\] validated image\/png;/)).toBeVisible();
   await page.getByRole("button", { name: "Analyze image" }).click();
 
   await expect(page.getByText("Scan complete")).toBeVisible({ timeout: 150_000 });

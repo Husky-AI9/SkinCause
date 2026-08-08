@@ -15,7 +15,13 @@ import type {
   RoutineRecommendation,
   SkinSimulation
 } from "@skincause/contracts";
-import { seededExperiment, skinSimulationDisclaimer } from "@skincause/domain";
+import {
+  getVisibleAcnePatternAssessment,
+  scans,
+  seededExperiment,
+  skinSimulationDisclaimer,
+  summarizeScanReadiness
+} from "@skincause/domain";
 import { apiOrigin } from "../../src/config";
 import { servingForFood } from "../../src/nutrition";
 import { errorMessage, useMobile } from "../../src/mobile-provider";
@@ -129,6 +135,7 @@ export default function ExperimentScreen() {
   const [activeStudio, setActiveStudio] = useState<"plan" | "simulation">("plan");
   const [recommendationBusy, setRecommendationBusy] = useState(false);
   const [simulationBusy, setSimulationBusy] = useState(false);
+  const [productImageFailed, setProductImageFailed] = useState(false);
   const [error, setError] = useState("");
 
   const experimentId = experiment?.id ?? demoExperimentId;
@@ -180,6 +187,7 @@ export default function ExperimentScreen() {
   async function generateSuggestion() {
     setActiveStudio("plan");
     setRecommendationBusy(true);
+    setProductImageFailed(false);
     setError("");
     try {
       setRecommendation(await generateRoutineRecommendation(experimentId));
@@ -208,6 +216,9 @@ export default function ExperimentScreen() {
 
   const displayedExperiment = experiment ?? seededExperiment;
   const result = displayedExperiment.result ?? seededExperiment.result;
+  const baseline = scans[0];
+  const readiness = summarizeScanReadiness(baseline);
+  const acneAssessment = getVisibleAcnePatternAssessment(baseline);
   const afterUri = simulation?.imageUrl
     ? simulation.imageUrl.startsWith("http")
       ? simulation.imageUrl
@@ -230,6 +241,40 @@ export default function ExperimentScreen() {
       </View>
 
       {error ? <Notice danger>{error}</Notice> : null}
+
+      <Section title="Experiment evidence card">
+        <View style={styles.evidenceHeroRow}>
+          <Image
+            source={{ uri: demoBeforeUri }}
+            style={styles.evidenceThumbnail}
+            resizeMode="cover"
+            accessibilityLabel="Synthetic acne-visible portrait used for this demo scan and simulation"
+          />
+          <View style={styles.evidenceHeroCopy}>
+            <Text style={styles.smallLabel}>Same scan source</Text>
+            <Text style={styles.cardTitle}>One change. One comparable baseline.</Text>
+            <Text style={styles.body}>{readiness.label} · {readiness.score}/100 capture readiness</Text>
+            <Text style={styles.body}>
+              Acne severity {acneAssessment.severity?.normalizedSeverity ?? "—"}/100 · {acneAssessment.visiblePattern ?? "Unclassified visible acne pattern"}
+            </Text>
+          </View>
+        </View>
+        <View style={styles.statsGrid}>
+          <View style={styles.metric}>
+            <Text style={styles.metricValue}>14</Text>
+            <Text style={styles.metricLabel}>day observation</Text>
+          </View>
+          <View style={styles.metric}>
+            <Text style={styles.metricValue}>{recommendation?.measurementKeys.length ?? 3}</Text>
+            <Text style={styles.metricLabel}>locked signals</Text>
+          </View>
+          <View style={styles.metric}>
+            <Text style={styles.metricValue}>{simulation?.status === "succeeded" ? "Yes" : "No"}</Text>
+            <Text style={styles.metricLabel}>illustration generated</Text>
+          </View>
+        </View>
+        {readiness.note ? <Text style={styles.finePrint}>{readiness.note}</Text> : null}
+      </Section>
 
       <View style={styles.studioTabs}>
         <PrimaryButton
@@ -261,6 +306,15 @@ export default function ExperimentScreen() {
               ) : null}
               {recommendation.candidateProduct ? (
                 <View style={styles.card}>
+                  {recommendation.candidateProduct.imageUrl && !productImageFailed ? (
+                    <Image
+                      source={{ uri: recommendation.candidateProduct.imageUrl }}
+                      style={styles.productImage}
+                      resizeMode="contain"
+                      accessibilityLabel={`${recommendation.candidateProduct.brand} ${recommendation.candidateProduct.name}`}
+                      onError={() => setProductImageFailed(true)}
+                    />
+                  ) : null}
                   <Text style={styles.smallLabel}>Suggested candidate</Text>
                   <Text style={styles.cardTitle}>
                     {recommendation.candidateProduct.brand}{" "}
@@ -272,9 +326,35 @@ export default function ExperimentScreen() {
                       ? ` · ${recommendation.candidateProduct.estimatedPrice}`
                       : ""}
                   </Text>
+                  {recommendation.candidateProduct.packageSize ? (
+                    <Text style={styles.body}>
+                      {recommendation.candidateProduct.packageSize}
+                      {recommendation.candidateProduct.pricePerUnit
+                        ? ` · ${recommendation.candidateProduct.pricePerUnit}`
+                        : ""}
+                    </Text>
+                  ) : null}
+                  {recommendation.candidateProduct.priceCheckedAt ? (
+                    <Text style={styles.finePrint}>
+                      Price checked {new Date(recommendation.candidateProduct.priceCheckedAt).toLocaleDateString()}; verify before buying.
+                    </Text>
+                  ) : null}
                   {recommendation.candidateProduct.localAvailability ? (
                     <Text style={styles.body}>
                       {recommendation.candidateProduct.localAvailability}
+                    </Text>
+                  ) : null}
+                  {recommendation.candidateProduct.keyIngredients.length > 0 ? (
+                    <Text style={styles.body}>
+                      Label highlights: {recommendation.candidateProduct.keyIngredients.join(", ")}
+                    </Text>
+                  ) : null}
+                  {recommendation.candidateProduct.usageNote ? (
+                    <Notice>{recommendation.candidateProduct.usageNote}</Notice>
+                  ) : null}
+                  {recommendation.candidateProduct.lowerCostAlternative ? (
+                    <Text style={styles.finePrint}>
+                      Lower-cost option: {recommendation.candidateProduct.lowerCostAlternative}
                     </Text>
                   ) : null}
                   {recommendation.candidateProduct.productUrl ? (
@@ -288,7 +368,7 @@ export default function ExperimentScreen() {
                   ) : null}
                 </View>
               ) : null}
-              <Text style={styles.smallLabel}>Foods and daily quantities</Text>
+              <Text style={styles.smallLabel}>Queue as a later nutrition experiment</Text>
               <View style={styles.nutritionGrid}>
                 {recommendation.nutritionGuidance.foodsToConsider.map((food) => (
                   <View style={styles.nutritionCard} key={food}>
@@ -300,6 +380,9 @@ export default function ExperimentScreen() {
               <Text style={styles.finePrint}>
                 {recommendation.nutritionGuidance.evidenceNote}
               </Text>
+              <Notice>
+                Keep meals stable during this product experiment. Test one food habit separately later.
+              </Notice>
               <View style={styles.tagRow}>
                 {recommendation.measurementKeys.map((key) => (
                   <View style={styles.tag} key={key}>

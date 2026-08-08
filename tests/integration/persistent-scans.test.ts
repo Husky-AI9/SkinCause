@@ -160,7 +160,7 @@ describe("persistent scan service", () => {
       result: { id: first.id, provider: "mock" }
     });
     expect(completed?.activity?.map((event) => event.message)).toContain(
-      "7 scores and 0 masks persisted"
+      "8 scores and 0 masks persisted"
     );
     expect(images.images.size).toBe(0);
     expect(repository.scans.get(first.id)?.imagePath).toBeNull();

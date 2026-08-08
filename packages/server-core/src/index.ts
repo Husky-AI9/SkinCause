@@ -14,11 +14,17 @@ import {
 } from "./youcam-schemas";
 import { validateSdImageDimensions } from "./image-dimensions";
 import { safeProviderFailure } from "./provider-errors";
+import {
+  appendAcnePatternAssessment,
+  type AcnePatternAssessmentProvider
+} from "./acne-pattern-assessment";
 
 export * from "./skin-analysis-profile";
+export * from "./acne-pattern-assessment";
 
 export interface SkinAnalysisProvider {
   readonly providerName: "mock" | "youcam";
+  enrichAcnePattern?(scan: Scan, idempotencyKey: string): Promise<Scan>;
   createAnalysis(input: {
     image: Uint8Array;
     mimeType: "image/jpeg" | "image/png";
@@ -36,6 +42,17 @@ export interface SkinAnalysisProvider {
 export class MockSkinAnalysisProvider implements SkinAnalysisProvider {
   readonly providerName = "mock" as const;
   private requests = new Map<string, string>();
+
+  constructor(private readonly acneAssessmentProvider?: AcnePatternAssessmentProvider) {}
+
+  async enrichAcnePattern(scan: Scan, idempotencyKey: string) {
+    if (!this.acneAssessmentProvider) return scan;
+    const assessment = await this.acneAssessmentProvider.assess({
+      concerns: scan.concerns,
+      idempotencyKey
+    });
+    return appendAcnePatternAssessment(scan, assessment);
+  }
 
   async createAnalysis(input: {
     image: Uint8Array;
@@ -59,18 +76,28 @@ export class MockSkinAnalysisProvider implements SkinAnalysisProvider {
     };
   }
 
-  async getAnalysis(_externalTaskId: string) {
-    const result = scans.at(-1)!;
+  async getAnalysis(externalTaskId: string) {
+    let result = scans.at(-1)!;
+    const activity: ScanActivityEvent[] = [
+      scanActivity("mock", "deterministic test task completed", "success")
+    ];
+    if (this.acneAssessmentProvider) {
+      try {
+        result = await this.enrichAcnePattern(result, `mock-acne-${externalTaskId}`);
+        activity.push(scanActivity("skincause", "AI visible acne-pattern assessment added", "success"));
+      } catch {
+        activity.push(scanActivity("skincause", "AI visible acne-pattern assessment unavailable", "error"));
+      }
+    }
     const scores = result.concerns
+      .filter((concern) => concern.normalizedSeverity !== null)
       .map((concern) => `${concern.key}=${concern.normalizedSeverity ?? "n/a"}`)
       .join(" ");
+    activity.push(scanActivity("mock", `test output normalized: ${scores}`, "success"));
     return {
       status: "succeeded" as const,
       result,
-      activity: [
-        scanActivity("mock", "deterministic test task completed", "success"),
-        scanActivity("mock", `test output normalized: ${scores}`, "success")
-      ]
+      activity
     };
   }
 }
@@ -81,8 +108,18 @@ export class YouCamSkinAnalysisProvider implements SkinAnalysisProvider {
   constructor(
     private readonly apiKey: string,
     private readonly baseUrl = "https://yce-api-01.makeupar.com",
-    private readonly apiVersion = "v2.1"
+    private readonly apiVersion = "v2.1",
+    private readonly acneAssessmentProvider?: AcnePatternAssessmentProvider
   ) {}
+
+  async enrichAcnePattern(scan: Scan, idempotencyKey: string) {
+    if (!this.acneAssessmentProvider) return scan;
+    const assessment = await this.acneAssessmentProvider.assess({
+      concerns: scan.concerns,
+      idempotencyKey
+    });
+    return appendAcnePatternAssessment(scan, assessment);
+  }
 
   async createAnalysis(input: {
     image: Uint8Array;
@@ -254,18 +291,28 @@ export class YouCamSkinAnalysisProvider implements SkinAnalysisProvider {
       "success"
     ));
 
+    let result: Scan = {
+      id: `youcam-${externalTaskId}`,
+      status: "normalized" as const,
+      capturedAt: new Date().toISOString(),
+      provider: "youcam" as const,
+      providerVersion: this.apiVersion,
+      analysisProfileVersion: ROUTINE_SD_PROFILE_VERSION,
+      concerns,
+      captureWarnings: []
+    };
+    if (this.acneAssessmentProvider) {
+      try {
+        result = await this.enrichAcnePattern(result, `acne-pattern-${externalTaskId}`);
+        activity.push(scanActivity("skincause", "OpenAI visible acne-pattern assessment added", "success"));
+      } catch {
+        activity.push(scanActivity("skincause", "OpenAI visible acne-pattern assessment unavailable", "error"));
+      }
+    }
+
     return {
       status: "succeeded" as const,
-      result: {
-        id: `youcam-${externalTaskId}`,
-        status: "normalized" as const,
-        capturedAt: new Date().toISOString(),
-        provider: "youcam" as const,
-        providerVersion: this.apiVersion,
-        analysisProfileVersion: ROUTINE_SD_PROFILE_VERSION,
-        concerns,
-        captureWarnings: []
-      },
+      result,
       activity
     };
   }

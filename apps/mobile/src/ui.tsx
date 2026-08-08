@@ -115,6 +115,15 @@ export const styles = StyleSheet.create({
   pill: { alignSelf: "flex-start", paddingHorizontal: 10, paddingVertical: 5, borderRadius: 99, backgroundColor: colors.seaGlass },
   pillText: { color: colors.tealDark, fontWeight: "700", fontSize: 12 },
   image: { width: "100%", aspectRatio: 1, borderRadius: 14, backgroundColor: colors.seaGlass },
+  productImage: {
+    width: "100%",
+    height: 160,
+    marginBottom: 6,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 10,
+    backgroundColor: colors.white
+  },
   divider: { height: 1, backgroundColor: colors.line },
   concernList: { gap: 4 },
   concernRow: {
@@ -125,7 +134,14 @@ export const styles = StyleSheet.create({
   },
   concernHeading: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
   concernLabel: { flex: 1, color: colors.ink, fontWeight: "800", fontSize: 14 },
-  concernScore: { color: colors.tealDark, fontWeight: "800", fontSize: 16 },
+  concernScore: {
+    width: 40,
+    color: colors.tealDark,
+    fontWeight: "800",
+    fontSize: 16,
+    fontVariant: ["tabular-nums"],
+    textAlign: "right"
+  },
   concernTrack: { height: 8, borderRadius: 99, overflow: "hidden", backgroundColor: colors.canvas },
   concernFill: { height: "100%", borderRadius: 99, backgroundColor: colors.coral },
   changeCard: {
@@ -136,6 +152,21 @@ export const styles = StyleSheet.create({
     borderLeftColor: colors.coral,
     backgroundColor: "#fff4ef"
   },
+  evidenceHeroRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 13,
+    padding: 10,
+    borderRadius: 12,
+    backgroundColor: colors.seaGlass
+  },
+  evidenceThumbnail: {
+    width: 96,
+    height: 112,
+    borderRadius: 10,
+    backgroundColor: colors.canvas
+  },
+  evidenceHeroCopy: { flex: 1, minWidth: 0, gap: 5 },
   smallLabel: {
     color: colors.inkSoft,
     fontWeight: "800",

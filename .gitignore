@@ -1,15 +1,47 @@
-node_modules
-.next
-.expo
-.open-next
-dist
-coverage
-playwright-report
-test-results
-tmp
+# Dependencies and package-manager caches
+node_modules/
+.pnpm-store/
+
+# Framework and build output
+.next/
+.open-next/
+.expo/
+.turbo/
+.vercel/
+.wrangler/
+dist/
+coverage/
+apps/mobile/android/
+apps/mobile/ios/
+apps/mobile/expo-env.d.ts
+
+# Test and document-render artifacts
+playwright-report/
+test-results/
+docs/.rendered/
+docs/.docx-qa/
+
+# Local runtime and temporary files
+.codex-runtime/
+tmp/
 *.log
+*.tmp
+*.bak
+
+# Credentials and machine-specific environment files
 .env
-.env.local
-.env.vercel
+.env.*
+!.env.example
+!**/.env.example
+
+# TypeScript and editor caches
 *.tsbuildinfo
+.idea/
+.vscode/
+
+# OS metadata
 .DS_Store
+Thumbs.db
+
+# This repository uses pnpm as its single lockfile source of truth
+package-lock.json

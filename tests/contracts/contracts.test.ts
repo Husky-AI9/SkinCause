@@ -3,6 +3,7 @@ import {
   createCheckInSchema,
   createExperimentSchema,
   productSchema,
+  routineRecommendationRequestSchema,
   routineRecommendationSchema,
   scanActivityEventSchema,
   scanSchema,
@@ -41,6 +42,12 @@ describe("portable API contracts", () => {
       adherence: 120,
       observation: 11
     }).success).toBe(false);
+  });
+
+  it("validates the configurable recommendation budget", () => {
+    expect(routineRecommendationRequestSchema.safeParse({ maxUnitPriceUsd: 40 }).success).toBe(true);
+    expect(routineRecommendationRequestSchema.safeParse({ maxUnitPriceUsd: 0 }).success).toBe(false);
+    expect(routineRecommendationRequestSchema.safeParse({ maxUnitPriceUsd: 501 }).success).toBe(false);
   });
 
   it("validates signed and same-origin scan upload targets", () => {
@@ -128,9 +135,16 @@ describe("portable API contracts", () => {
         brand: "Example brand",
         category: "Moisturizer",
         productUrl: "https://example.test/product",
+        imageUrl: "https://example.test/product.jpg",
         estimatedPrice: "$12.99",
+        packageSize: "3 fl oz",
+        pricePerUnit: "$4.33 per fl oz",
+        priceCheckedAt: "2026-08-07T12:00:00.000Z",
         localAvailability: "Major US retailers",
-        affordabilityNote: "Below the configured demo budget."
+        affordabilityNote: "Below the configured demo budget.",
+        keyIngredients: ["Ceramides", "Squalane"],
+        usageNote: "Introduce as the only routine change and follow the label.",
+        lowerCostAlternative: "Keep the current moisturizer."
       },
       summary: "Test one replacement while keeping the rest of the routine stable.",
       rationale: ["The experiment showed a repeated visible pattern."],

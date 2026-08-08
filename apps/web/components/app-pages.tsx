@@ -1,19 +1,25 @@
 "use client";
 
-import type {
-  Experiment,
-  RoutineRecommendation,
-  Scan,
-  ScanActivityEvent,
-  ScanUploadSession,
-  SkinSimulation
+import {
+  AI_ACNE_PATTERN_CONCERN_KEY,
+  AI_ACNE_SEVERITY_CONCERN_KEY,
+  type Experiment,
+  type RoutineRecommendation,
+  type Scan,
+  type ScanActivityEvent,
+  type ScanUploadSession,
+  type SkinSimulation
 } from "@skincause/contracts";
 import {
   classifyCosmeticConcern,
+  compareScanConcerns,
+  getVisibleAcnePatternAssessment,
   insufficientResult,
   seededExperiment,
   scans,
-  persistentDisclaimer
+  persistentDisclaimer,
+  roundVisibleSeverity,
+  summarizeScanReadiness
 } from "@skincause/domain";
 import {
   ArrowLeft,
@@ -87,6 +93,7 @@ const dailyNutritionTargets = [
 
 type PlannedAiExperiment = {
   actionLabel: string;
+  budgetUsd?: number;
   productName: string | null;
   productMeta: string | null;
   productUrl: string | null;
@@ -169,12 +176,14 @@ function mergeActivity(current: ScanActivityEvent[], incoming: ScanActivityEvent
 function orderedConcerns(scan: Scan) {
   const order = new Map([
     ["blemish_pattern", 0],
-    ["redness", 1],
-    ["texture", 2],
-    ["pores", 3],
-    ["oiliness", 4],
-    ["hydration", 5],
-    ["radiance", 6]
+    [AI_ACNE_SEVERITY_CONCERN_KEY, 1],
+    ["redness", 2],
+    ["texture", 3],
+    ["pores", 4],
+    ["oiliness", 5],
+    ["hydration", 6],
+    ["radiance", 7],
+    [AI_ACNE_PATTERN_CONCERN_KEY, 8]
   ]);
   return [...scan.concerns].sort(
     (left, right) => (order.get(left.key) ?? 99) - (order.get(right.key) ?? 99)
@@ -194,7 +203,7 @@ function ConcernScoreIcon({ concernKey }: { concernKey: string }) {
   if (concernKey === "radiance") {
     return <Sparkles size={18} aria-hidden="true" />;
   }
-  if (concernKey === "blemish_pattern") {
+  if (concernKey === "blemish_pattern" || concernKey === AI_ACNE_SEVERITY_CONCERN_KEY) {
     return <CircleDot size={18} aria-hidden="true" />;
   }
   return <Flame size={18} aria-hidden="true" />;
@@ -638,12 +647,16 @@ export function DashboardPage() {
 
       let storedPlan: PlannedAiExperiment | null = null;
       const storedPlanValue = window.localStorage.getItem(plannedAiExperimentStorageKey);
-      if (storedPlanValue && authStatus !== "authenticated") {
+      if (storedPlanValue) {
         try {
           const parsed = JSON.parse(storedPlanValue) as Partial<PlannedAiExperiment>;
           if (typeof parsed.actionLabel === "string" && typeof parsed.hypothesis === "string") {
             storedPlan = {
               actionLabel: parsed.actionLabel,
+              budgetUsd:
+                typeof parsed.budgetUsd === "number" && Number.isFinite(parsed.budgetUsd)
+                  ? parsed.budgetUsd
+                  : undefined,
               productName: typeof parsed.productName === "string" ? parsed.productName : null,
               productMeta: typeof parsed.productMeta === "string" ? parsed.productMeta : null,
               productUrl: typeof parsed.productUrl === "string" ? parsed.productUrl : null,
@@ -738,8 +751,15 @@ export function DashboardPage() {
   }
 
   const displayedScan = latestScan ?? (demoMode ? scans[0] : null);
-  const displayedConcerns = displayedScan ? orderedConcerns(displayedScan).slice(0, 5) : [];
-  const acneConcern = displayedConcerns.find((concern) => concern.key === "blemish_pattern");
+  const scanReadiness = displayedScan ? summarizeScanReadiness(displayedScan) : null;
+  const displayedConcerns = displayedScan
+    ? orderedConcerns(displayedScan)
+        .filter((concern) => concern.normalizedSeverity !== null)
+        .slice(0, 5)
+    : [];
+  const acneAssessment = displayedScan
+    ? getVisibleAcnePatternAssessment(displayedScan)
+    : null;
   const demoExperiment = demoMode ? seededExperiment : null;
   const selectedProductId =
     latestExperiment?.suspectProductId ?? demoExperiment?.suspectProductId;
@@ -773,7 +793,7 @@ export function DashboardPage() {
     latestExperiment?.primaryConcerns ??
     plannedExperiment?.measurementKeys ??
     (demoMode
-      ? ["blemish_pattern", "redness", "texture"]
+      ? [AI_ACNE_SEVERITY_CONCERN_KEY, "blemish_pattern", "redness"]
       : displayedConcerns.slice(0, 3).map((concern) => concern.key));
   const experimentDetailId = latestExperiment?.id ?? (demoMode ? experimentId : null);
   const experimentStatus =
@@ -805,11 +825,11 @@ export function DashboardPage() {
 
       <section className="acne-plan-overview" aria-label="Acne plan overview">
         <article className="acne-plan-stat">
-          <span>Latest acne signal</span>
-          <strong>{summaryLoading ? "…" : acneConcern?.normalizedSeverity ?? "—"}</strong>
+          <span>Acne severity</span>
+          <strong>{summaryLoading ? "…" : acneAssessment?.severity?.normalizedSeverity ?? "—"}</strong>
           <small>
             {displayedScan
-              ? classifyCosmeticConcern(acneConcern?.normalizedSeverity ?? null).label
+              ? classifyCosmeticConcern(acneAssessment?.severity?.normalizedSeverity ?? null).label
               : "Complete a scan to begin"}
           </small>
         </article>
@@ -847,10 +867,34 @@ export function DashboardPage() {
               View scan <ArrowRight size={16} />
             </Link>
           </div>
+          {acneAssessment?.severity || acneAssessment?.visiblePattern ? (
+            <div className="acne-ai-assessment" aria-label="AI visible acne-pattern assessment">
+              <div>
+                <span>Acne severity score</span>
+                <strong>
+                  {acneAssessment.severity?.normalizedSeverity ?? "—"}<small>/100</small>
+                </strong>
+              </div>
+              <div>
+                <span>Observed acne pattern</span>
+                <strong>{acneAssessment.visiblePattern ?? "Unclassified visible acne pattern"}</strong>
+              </div>
+              <p>OpenAI organizes the normalized YouCam measurements. This is a cosmetic pattern description, not an acne diagnosis.</p>
+            </div>
+          ) : null}
+          {scanReadiness ? (
+            <div className="scan-readiness acne-plan-readiness">
+              <div>
+                <span>Capture readiness</span>
+                <strong>{scanReadiness.score}/100 · {scanReadiness.label}</strong>
+              </div>
+              {scanReadiness.note ? <p>{scanReadiness.note}</p> : null}
+            </div>
+          ) : null}
           {displayedConcerns.length > 0 ? (
             <div className="acne-concern-list">
               {displayedConcerns.map((concern) => {
-                const severity = concern.normalizedSeverity ?? 0;
+                const severity = roundVisibleSeverity(concern.normalizedSeverity) ?? 0;
                 const classification = classifyCosmeticConcern(concern.normalizedSeverity);
                 return (
                   <article className="acne-concern-row" key={concern.key}>
@@ -892,6 +936,7 @@ export function DashboardPage() {
               <span>{experimentAction}</span>
               <strong>{experimentProductName}</strong>
               {plannedExperiment?.productMeta ? <small>{plannedExperiment.productMeta}</small> : null}
+              {plannedExperiment?.budgetUsd ? <small>Product budget: ${plannedExperiment.budgetUsd.toFixed(0)}</small> : null}
             </div>
             <div className="acne-plan-hypothesis">
               <small>What you are measuring</small>
@@ -942,7 +987,7 @@ export function DashboardPage() {
           <div>
             <p className="eyebrow">Daily nutrition plan</p>
             <h2>Simple food and hydration targets</h2>
-            <p>Use these as practical daily serving targets while keeping the experiment routine stable.</p>
+            <p>Use these as a separate nutrition observation; keep them stable while a product experiment runs.</p>
           </div>
           <span className="status-pill"><CircleDot size={13} /> Daily</span>
         </div>
@@ -1020,17 +1065,25 @@ export function DashboardPage() {
 export function ProductsPage() {
   const { products, toggleProduct } = useAppState();
   return (
-    <main className="page-shell" id="main">
-      <h1 className="sr-only">Routine</h1>
-      <section className="panel">
-        <div className="panel-header">
-          <div><h2>Routine products</h2><p>Current products and usage status.</p></div>
-          <Link className="button button-small" href="/onboarding"><Plus size={18} /> Add product</Link>
+    <main className="page-shell products-page" id="main">
+      <PageHeading
+        eyebrow="Affordable routine"
+        title="Products in your acne plan"
+        description="Keep the routine visible, change one product at a time, and carry every selection into your next experiment."
+        action={<Link className="button" href="/onboarding"><Plus size={18} /> Add product</Link>}
+      />
+      <section className="products-workspace">
+        <div className="products-workspace-heading">
+          <div>
+            <p className="eyebrow">Current routine</p>
+            <h2>{products.length} products recorded</h2>
+          </div>
+          <span className="status-pill"><ShieldCheck size={13} /> One-change ready</span>
         </div>
-        <div className="product-list">
+        <div className="product-card-grid">
           {products.map((product) => (
-            <div className="product-row" key={product.id}>
-              <span className="product-swatch"><Droplets size={19} /></span>
+            <article className={`routine-product-card${product.active ? "" : " is-paused"}`} key={product.id}>
+              <span className="product-swatch"><Droplets size={21} /></span>
               <div>
                 <strong>{product.name}</strong>
                 <small>{product.brand || "Unbranded"} · {product.category} · started {new Date(product.startedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</small>
@@ -1039,15 +1092,20 @@ export function ProductsPage() {
                 {product.active ? "Active" : "Paused"}
               </span>
               <button className="button button-secondary button-small" onClick={() => toggleProduct(product.id)}>
-                {product.active ? "Pause" : "Restart"}
+                {product.active ? <Pause size={16} /> : <Check size={16} />}
+                {product.active ? "Pause product" : "Return to routine"}
               </button>
-            </div>
+            </article>
           ))}
         </div>
       </section>
-      <div className="callout" style={{ marginTop: 20 }}>
-        <strong>Audit-minded history</strong>
-        <p className="muted">Changes made here are recorded as new usage periods in the production data model.</p>
+      <div className="products-trust-strip">
+        <ShieldCheck size={20} />
+        <div>
+          <strong>Your routine remains the control.</strong>
+          <span>Product changes are recorded as usage periods so each experiment keeps a comparable history.</span>
+        </div>
+        <Link href="/experiments/new">Plan one change <ArrowRight size={16} /></Link>
       </div>
     </main>
   );
@@ -1487,6 +1545,7 @@ function ScanResultsSidebar({
   result: Scan | null;
   onPlanExperiment: () => void;
 }) {
+  const readiness = result ? summarizeScanReadiness(result) : null;
   return (
     <aside className="panel scan-results-sidebar" aria-label="Scan results">
       <div className="scan-results-header">
@@ -1502,6 +1561,15 @@ function ScanResultsSidebar({
       <div className="scan-results-scroll">
         {status === "done" && result ? (
           <div className="scan-score-list" data-testid="provider-score-summary">
+            {readiness ? (
+              <div className="scan-readiness" aria-label={`Capture readiness ${readiness.score} out of 100`}>
+                <div>
+                  <span>Capture readiness</span>
+                  <strong>{readiness.score}/100</strong>
+                </div>
+                <p>{readiness.label}{readiness.note ? `. ${readiness.note}` : ""}</p>
+              </div>
+            ) : null}
             {orderedConcerns(result).map((concern) => {
               const assessment = classifyCosmeticConcern(concern.normalizedSeverity);
               return (
@@ -1634,7 +1702,11 @@ export function ExperimentPlannerPage() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [baseline, setBaseline] = useState<Scan | null>(null);
+  const [baselineImageUrl, setBaselineImageUrl] = useState(
+    authStatus === "authenticated" ? "" : "/images/demo-face-acne.png"
+  );
   const [selectedProductId, setSelectedProductId] = useState("");
+  const [budgetUsd, setBudgetUsd] = useState(25);
   const [selectedMeasurements, setSelectedMeasurements] = useState<string[] | null>(null);
   const [hypothesis, setHypothesis] = useState(
     "Observe whether the selected visible patterns change while this one routine step is adjusted."
@@ -1646,7 +1718,7 @@ export function ExperimentPlannerPage() {
   const stagedCandidateIdRef = useRef<string | null>(null);
   const evidenceExperimentId =
     searchParams.get("from") ?? (authStatus === "authenticated" ? null : experimentId);
-  const availableConcerns = (baseline?.concerns ?? scans[0].concerns)
+  const availableConcerns = orderedConcerns(baseline ?? scans[0])
     .filter((concern) => concern.experimentRole === "primary");
   const defaultMeasurementKeys = availableConcerns.slice(0, 2).map((concern) => concern.key);
   const selectedMeasurementKeys = selectedMeasurements ?? defaultMeasurementKeys;
@@ -1672,6 +1744,35 @@ export function ExperimentPlannerPage() {
       });
   }, [apiFetch, authStatus]);
 
+  useEffect(() => {
+    if (authStatus !== "authenticated") {
+      const timer = window.setTimeout(() => setBaselineImageUrl("/images/demo-face-acne.png"), 0);
+      return () => window.clearTimeout(timer);
+    }
+    if (!baseline) return;
+    let active = true;
+    let objectUrl = "";
+    void apiFetch(`/api/v1/scans/${encodeURIComponent(baseline.id)}/image`, {
+      cache: "no-store"
+    })
+      .then(async (response) => {
+        if (!response.ok) return null;
+        return response.blob();
+      })
+      .then((blob) => {
+        if (!active || !blob) return;
+        objectUrl = URL.createObjectURL(blob);
+        setBaselineImageUrl(objectUrl);
+      })
+      .catch(() => {
+        // The original may already be deleted by the user's retention setting.
+      });
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [apiFetch, authStatus, baseline]);
+
   function applyRoutineRecommendation(recommendation: RoutineRecommendation) {
     const availableKeys = new Set(availableConcerns.map((concern) => concern.key));
     const recommendedMeasurements = recommendation.measurementKeys
@@ -1694,9 +1795,9 @@ export function ExperimentPlannerPage() {
 
     setHypothesis(recommendation.summary);
     setNutritionObservation(
-      `Foods to consider: ${recommendation.nutritionGuidance.foodsToConsider.join(", ")}. ${recommendation.nutritionGuidance.trackingPrompt}`
+      `Keep meals broadly consistent. Queue for a later food experiment: ${recommendation.nutritionGuidance.foodsToConsider.join(", ")}. ${recommendation.nutritionGuidance.trackingPrompt}`
     );
-    setIncludeNutritionObservation(true);
+    setIncludeNutritionObservation(false);
     setAppliedRecommendation(recommendation);
     stagedCandidateIdRef.current = null;
     setError("");
@@ -1722,14 +1823,14 @@ export function ExperimentPlannerPage() {
       ? `${hypothesis.trim()}\n\nNutrition context to track: ${selectedNutritionObservation}`
       : hypothesis.trim();
 
-    if (authStatus !== "authenticated") {
-      const candidate = appliedRecommendation?.candidateProduct;
+    const candidate = appliedRecommendation?.candidateProduct;
       const plannedAiExperiment: PlannedAiExperiment = {
         actionLabel: appliedRecommendation
           ? recommendationActionLabel(appliedRecommendation.action)
           : type === "elimination"
             ? "Suspend product"
             : "Add or replace product",
+        budgetUsd,
         productName: candidate
           ? `${candidate.brand} ${candidate.name}`
           : products.find((product) => product.id === effectiveProductId)?.name ?? null,
@@ -1747,6 +1848,7 @@ export function ExperimentPlannerPage() {
         plannedAiExperimentStorageKey,
         JSON.stringify(plannedAiExperiment)
       );
+    if (authStatus !== "authenticated") {
       router.push(`/experiments/${experimentId}`);
       return;
     }
@@ -1829,7 +1931,15 @@ export function ExperimentPlannerPage() {
       <form className="experiment-planner-form" onSubmit={submit}>
         <div className="planner-stack">
           <section className="panel planner-workspace-panel">
-            <div className="form-grid planner-fields">
+            <section className="planner-zone planner-zone--experiment">
+              <div className="planner-zone-heading">
+                <span>01</span>
+                <div>
+                  <p className="eyebrow">Your experiment</p>
+                  <h2>Choose the one change to test</h2>
+                </div>
+              </div>
+              <div className="form-grid planner-fields">
             <div className="field full">
               <span className="field-label">Planned change</span>
               <div className="segmented" style={{ gridTemplateColumns: "repeat(2, 1fr)" }}>
@@ -1866,6 +1976,24 @@ export function ExperimentPlannerPage() {
             <div className="field">
               <label htmlFor="start-date">Start date</label>
               <input id="start-date" name="startedAt" type="date" defaultValue="2026-07-24" required />
+            </div>
+            <div className="field">
+              <label htmlFor="product-budget">Maximum product budget</label>
+              <div className="budget-input">
+                <span aria-hidden="true">$</span>
+                <input
+                  id="product-budget"
+                  name="maxUnitPriceUsd"
+                  type="number"
+                  min="1"
+                  max="500"
+                  step="1"
+                  value={budgetUsd}
+                  onChange={(event) => setBudgetUsd(Number(event.target.value))}
+                  required
+                />
+                <small>USD</small>
+              </div>
             </div>
             <div className="field full">
               <span className="field-label">Measurements to compare</span>
@@ -1925,6 +2053,19 @@ export function ExperimentPlannerPage() {
                         {appliedRecommendation.candidateProduct.estimatedPrice ? (
                           <span>{appliedRecommendation.candidateProduct.estimatedPrice}</span>
                         ) : null}
+                        {appliedRecommendation.candidateProduct.packageSize ? (
+                          <span>
+                            {appliedRecommendation.candidateProduct.packageSize}
+                            {appliedRecommendation.candidateProduct.pricePerUnit
+                              ? ` · ${appliedRecommendation.candidateProduct.pricePerUnit}`
+                              : ""}
+                          </span>
+                        ) : null}
+                        {appliedRecommendation.candidateProduct.keyIngredients.length > 0 ? (
+                          <span>
+                            Label highlights: {appliedRecommendation.candidateProduct.keyIngredients.join(", ")}
+                          </span>
+                        ) : null}
                         {appliedRecommendation.candidateProduct.localAvailability ? (
                           <span>{appliedRecommendation.candidateProduct.localAvailability}</span>
                         ) : null}
@@ -1948,7 +2089,7 @@ export function ExperimentPlannerPage() {
                         checked={includeNutritionObservation}
                         onChange={(event) => setIncludeNutritionObservation(event.target.checked)}
                       />
-                      <span>Track nutrition context during this experiment</span>
+                      <span>Record nutrition deviations without changing the food plan</span>
                     </label>
                     <textarea
                       aria-label="Nutrition observation to track"
@@ -1962,6 +2103,7 @@ export function ExperimentPlannerPage() {
                         <span key={food}>{food}</span>
                       ))}
                     </div>
+                    <small>Queue these foods for a separate one-variable experiment; do not add them during this product test.</small>
                     <small>{appliedRecommendation.nutritionGuidance.suggestion}</small>
                     <small>{appliedRecommendation.nutritionGuidance.evidenceNote}</small>
                   </article>
@@ -1969,16 +2111,28 @@ export function ExperimentPlannerPage() {
               </details>
             ) : null}
             </div>
+              <PlannerBaselineCard
+                scan={baseline ?? scans[0]}
+                imageUrl={baselineImageUrl}
+              />
+            </section>
             {evidenceExperimentId ? (
               <ExperimentAiTools
                 id={evidenceExperimentId}
+                baselineScan={baseline ?? scans[0]}
+                budgetUsd={budgetUsd}
                 onApplyRecommendation={applyRoutineRecommendation}
               />
             ) : (
               <section className="experiment-ai-panel experiment-ai-panel--embedded">
                 <div className="ai-studio-empty">
-                  <p className="eyebrow"><Sparkles size={13} /> AI-assisted next change</p>
-                  <h2>Available after your first completed experiment</h2>
+                  <div className="planner-zone-heading ai-studio-heading">
+                    <span>02</span>
+                    <div>
+                      <p className="eyebrow"><Sparkles size={13} /> AI recommendation</p>
+                      <h2>Available after your first completed experiment</h2>
+                    </div>
+                  </div>
                   <p className="muted">
                     OpenAI uses recorded experiment evidence to suggest an addition, removal, or
                     replacement. YouCam needs a retained baseline and comparable follow-up scan to
@@ -1988,9 +2142,18 @@ export function ExperimentPlannerPage() {
               </section>
             )}
             <div className="planner-submit">
+              <div className="planner-submit-summary">
+                <span className="status-pill success"><CheckCircle2 size={13} /> Ready to start</span>
+                <div>
+                  <strong>
+                    One change. {selectedMeasurementKeys.length} comparable {selectedMeasurementKeys.length === 1 ? "measurement" : "measurements"}.
+                  </strong>
+                  <span>The remaining routine stays locked throughout the observation.</span>
+                </div>
+              </div>
               {error ? <p className="form-error" role="alert">{error}</p> : null}
               <button className="button" type="submit" disabled={busy || products.length === 0}>
-                {busy ? "Starting..." : "Start investigation"} <ArrowRight size={18} />
+                {busy ? "Starting..." : "Start experiment"} <ArrowRight size={18} />
               </button>
             </div>
           </section>
@@ -2269,6 +2432,174 @@ export function ExperimentDetailPage({ id = experimentId }: { id?: string }) {
   );
 }
 
+function ExperimentEvidenceCard({
+  baseline,
+  recommendation,
+  simulation,
+  result,
+  showDemoImage,
+  maxUnitPriceUsd = 25,
+  displayImage = true
+}: {
+  baseline: Scan;
+  recommendation: RoutineRecommendation | null;
+  simulation: SkinSimulation | null;
+  result?: Experiment["result"];
+  showDemoImage: boolean;
+  maxUnitPriceUsd?: number;
+  displayImage?: boolean;
+}) {
+  const readiness = summarizeScanReadiness(baseline);
+  const measurementKeys = recommendation?.measurementKeys.length
+    ? recommendation.measurementKeys
+    : baseline.concerns
+        .filter((concern) => concern.experimentRole === "primary")
+        .slice(0, 3)
+        .map((concern) => concern.key);
+  const changes = result && showDemoImage
+    ? compareScanConcerns(scans[0], scans.at(-1)!, measurementKeys)
+    : [];
+  const candidate = recommendation?.candidateProduct;
+
+  return (
+    <section
+      className={`experiment-evidence-card${displayImage ? "" : " experiment-evidence-card--without-image"}`}
+      aria-label="Experiment evidence card"
+    >
+      {displayImage ? <div className="experiment-evidence-image">
+        {showDemoImage ? (
+          <NextImage
+            src="/images/demo-face-acne.png"
+            alt="Synthetic acne-visible portrait used for this demo scan and simulation"
+            width={640}
+            height={640}
+            priority
+          />
+        ) : (
+          <div className="experiment-evidence-image-placeholder">
+            <ScanFace size={34} aria-hidden="true" />
+            <span>Private baseline retained for this experiment</span>
+          </div>
+        )}
+        <span className="experiment-evidence-image-label">Same scan source</span>
+      </div> : null}
+      <div className="experiment-evidence-body">
+        <div className="experiment-evidence-heading">
+          <div>
+            <p className="eyebrow"><FlaskConical size={13} /> Experiment evidence card</p>
+            <h3>One change. One comparable baseline.</h3>
+          </div>
+          <span className={`status-pill ${readiness.score >= 90 ? "success" : ""}`}>
+            {readiness.score}/100 capture
+          </span>
+        </div>
+        <div className="experiment-evidence-grid">
+          <article>
+            <small>Baseline quality</small>
+            <strong>{readiness.label}</strong>
+            {readiness.note ? <span>{readiness.note}</span> : null}
+          </article>
+          <article>
+            <small>Only planned change</small>
+            <strong>{recommendation ? recommendationActionLabel(recommendation.action) : "Awaiting AI suggestion"}</strong>
+            <span>
+              {candidate
+                ? `${candidate.brand} ${candidate.name}`
+                : recommendation?.existingProductName ?? "The rest of the routine stays locked"}
+            </span>
+          </article>
+          <article>
+            <small>Affordability proof</small>
+            <strong>{candidate?.estimatedPrice ?? `$${maxUnitPriceUsd.toFixed(0)} maximum target`}</strong>
+            <span>
+              {candidate?.pricePerUnit ?? "Price and availability must be source-verified"}
+              {candidate?.priceCheckedAt
+                ? ` · checked ${new Date(candidate.priceCheckedAt).toLocaleDateString()}`
+                : ""}
+            </span>
+          </article>
+          <article>
+            <small>Protocol</small>
+            <strong>14-day observation</strong>
+            <span>Baseline plus at least two comparable follow-ups</span>
+          </article>
+          <article>
+            <small>Locked measurements</small>
+            <strong>{measurementKeys.length || 0} signals</strong>
+            <span>{measurementKeys.map((key) => key.replaceAll("_", " ")).join(" · ")}</span>
+          </article>
+          <article>
+            <small>YouCam illustration</small>
+            <strong>{simulation?.status === "succeeded" ? "Generated" : simulation?.status === "processing" || simulation?.status === "queued" ? "Generating" : "Not generated"}</strong>
+            <span>Illustrative goal only—not a product forecast</span>
+          </article>
+        </div>
+        {changes.length > 0 ? (
+          <div className="experiment-change-strip" aria-label="Demo score changes from baseline">
+            {changes.map((change) => (
+              <div key={change.key}>
+                <span>{change.key.replaceAll("_", " ")}</span>
+                <strong>{change.baseline} → {change.latest}</strong>
+                <small>{change.delta > 0 ? "+" : ""}{change.delta} · {change.interpretation}</small>
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+function PlannerBaselineCard({ scan, imageUrl }: { scan: Scan; imageUrl: string }) {
+  const readiness = summarizeScanReadiness(scan);
+  const acneAssessment = getVisibleAcnePatternAssessment(scan);
+  const measurements = orderedConcerns(scan)
+    .filter((concern) => concern.experimentRole === "primary")
+    .slice(0, 3);
+
+  return (
+    <section className="planner-baseline-card" aria-label="Experiment baseline scan">
+      <div className="planner-baseline-image">
+        {imageUrl ? (
+          <NextImage
+            src={imageUrl}
+            alt="Baseline scan used for this experiment"
+            fill
+            sizes="(max-width: 640px) 100vw, 166px"
+            unoptimized
+          />
+        ) : (
+          <div className="experiment-evidence-image-placeholder">
+            <ImageOff size={28} aria-hidden="true" />
+            <span>Original deleted; normalized measurements remain available</span>
+          </div>
+        )}
+        <span>Baseline</span>
+      </div>
+      <div className="planner-baseline-copy">
+        <div>
+          <p className="eyebrow"><ScanFace size={13} /> Scan used for comparison</p>
+          <strong>{readiness.label}</strong>
+          <small>{readiness.score}/100 capture readiness</small>
+        </div>
+        <div className="planner-baseline-measurements">
+          {measurements.map((concern) => (
+            <div key={concern.key}>
+              <span>{concern.displayLabel ?? concern.providerLabel}</span>
+              <strong>{concern.normalizedSeverity ?? "—"}</strong>
+            </div>
+          ))}
+        </div>
+        <div className="planner-baseline-pattern">
+          <span>Observed acne pattern</span>
+          <strong>{acneAssessment.visiblePattern ?? "Unclassified visible acne pattern"}</strong>
+        </div>
+        {readiness.note ? <p>{readiness.note}</p> : null}
+      </div>
+    </section>
+  );
+}
+
 function recommendationActionLabel(action: RoutineRecommendation["action"]) {
   return {
     remove: "Remove from routine",
@@ -2281,9 +2612,13 @@ function recommendationActionLabel(action: RoutineRecommendation["action"]) {
 
 function ExperimentAiTools({
   id,
+  baselineScan,
+  budgetUsd,
   onApplyRecommendation
 }: {
   id: string;
+  baselineScan: Scan;
+  budgetUsd: number;
   onApplyRecommendation?(recommendation: RoutineRecommendation): void;
 }) {
   const { apiFetch, authStatus } = useAppState();
@@ -2404,12 +2739,20 @@ function ExperimentAiTools({
 
   async function generateRecommendation() {
     setActiveStudioTab("plan");
+    if (!Number.isFinite(budgetUsd) || budgetUsd < 1 || budgetUsd > 500) {
+      setRecommendationError("Enter a product budget between $1 and $500.");
+      return;
+    }
     setRecommendationBusy(true);
     setRecommendationError("");
     try {
       const response = await apiFetch(
         `/api/v1/experiments/${encodeURIComponent(id)}/recommendation`,
-        { method: "POST" }
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ maxUnitPriceUsd: budgetUsd })
+        }
       );
       const generated = await readApiResponse<RoutineRecommendation>(response);
       setRecommendation(generated);
@@ -2487,16 +2830,36 @@ function ExperimentAiTools({
     authStatus === "guest" || authStatus === "demo"
       ? "/images/demo-face-acne.png"
       : simulationSourceBlobUrl;
+  const baselineReadiness = summarizeScanReadiness(baselineScan);
 
   return (
     <section className="experiment-ai-panel experiment-ai-panel--embedded">
-      <div className="panel-header ai-studio-heading">
+      <div className="planner-zone-heading ai-studio-heading">
+        <span>02</span>
         <div>
-          <p className="eyebrow"><Sparkles size={13} /> AI experiment studio</p>
-          <h2>Product, food, and simulation</h2>
-          <p>Build one sourced change, then preview its illustrative measurement goal.</p>
+          <p className="eyebrow"><Sparkles size={13} /> AI recommendation</p>
+          <h2>Build an affordable next step</h2>
+          <p>Generate one sourced routine change, then preview its illustrative YouCam goal.</p>
         </div>
       </div>
+      <div className="ai-evidence-strip" aria-label="Experiment evidence summary">
+        <div><span>Baseline</span><strong>{baselineReadiness.label}</strong></div>
+        <div><span>Planned change</span><strong>{recommendation ? recommendationActionLabel(recommendation.action) : "Awaiting AI"}</strong></div>
+        <div><span>Budget</span><strong>${budgetUsd.toFixed(0)} maximum</strong></div>
+        <div><span>YouCam goal</span><strong>{simulation?.status === "succeeded" ? "Generated" : "Not generated"}</strong></div>
+      </div>
+      <details className="experiment-evidence-disclosure">
+        <summary>View experiment evidence</summary>
+        <ExperimentEvidenceCard
+          baseline={baselineScan}
+          recommendation={recommendation}
+          simulation={simulation}
+          result={authStatus === "guest" || authStatus === "demo" ? seededExperiment.result : undefined}
+          showDemoImage={authStatus === "guest" || authStatus === "demo"}
+          maxUnitPriceUsd={budgetUsd}
+          displayImage={false}
+        />
+      </details>
       <div className="ai-studio-tabs" role="tablist" aria-label="AI experiment studio views">
         <button
           className={activeStudioTab === "plan" ? "is-active" : ""}
@@ -2506,7 +2869,7 @@ function ExperimentAiTools({
           aria-controls="ai-plan-panel"
           onClick={() => setActiveStudioTab("plan")}
         >
-          <ListRestart size={16} /> Product + nutrition
+          <ListRestart size={16} /> 02 Recommendation
         </button>
         <button
           className={activeStudioTab === "simulation" ? "is-active" : ""}
@@ -2516,7 +2879,7 @@ function ExperimentAiTools({
           aria-controls="ai-simulation-panel"
           onClick={() => setActiveStudioTab("simulation")}
         >
-          <ScanFace size={16} /> Skin simulation
+          <ScanFace size={16} /> 03 Simulated goal
         </button>
       </div>
       <div className="experiment-ai-grid">
@@ -2541,18 +2904,71 @@ function ExperimentAiTools({
                 <p className="muted">Current product: {recommendation.existingProductName}</p>
               ) : null}
               {recommendation.candidateProduct ? (
-                <div className="candidate-product">
-                  <small>Suggested candidate</small>
-                  <strong>
-                    {recommendation.candidateProduct.brand}{" "}
-                    {recommendation.candidateProduct.name}
-                  </strong>
-                  <span>{recommendation.candidateProduct.category}</span>
+                <div className="candidate-product candidate-product--featured">
+                  {recommendation.candidateProduct.imageUrl ? (
+                    <div className="candidate-product-media">
+                      {/* AI recommendations may use different verified retailer hosts, so this image cannot use a fixed Next.js remote pattern. */}
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={recommendation.candidateProduct.imageUrl}
+                        alt={`${recommendation.candidateProduct.brand} ${recommendation.candidateProduct.name}`}
+                        onError={(event) => {
+                          event.currentTarget.parentElement?.setAttribute("hidden", "");
+                        }}
+                      />
+                    </div>
+                  ) : null}
+                  <div className="candidate-product-identity">
+                    <span className="product-swatch"><Droplets size={22} /></span>
+                    <div>
+                      <small>Suggested candidate</small>
+                      <strong>
+                        {recommendation.candidateProduct.brand}{" "}
+                        {recommendation.candidateProduct.name}
+                      </strong>
+                      <span>{recommendation.candidateProduct.category}</span>
+                    </div>
+                    {recommendation.candidateProduct.estimatedPrice ? (
+                      <div className="candidate-product-price">
+                        <small>Verified price</small>
+                        <strong>{recommendation.candidateProduct.estimatedPrice}</strong>
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="candidate-product-facts">
                   {recommendation.candidateProduct.estimatedPrice ? (
-                    <span><strong>Price:</strong> {recommendation.candidateProduct.estimatedPrice}</span>
+                    <span><strong>Budget:</strong> target ${budgetUsd.toFixed(0)} or less</span>
+                  ) : null}
+                  {recommendation.candidateProduct.packageSize ? (
+                    <span>
+                      <strong>Size:</strong> {recommendation.candidateProduct.packageSize}
+                      {recommendation.candidateProduct.pricePerUnit
+                        ? ` · ${recommendation.candidateProduct.pricePerUnit}`
+                        : ""}
+                    </span>
+                  ) : null}
+                  {recommendation.candidateProduct.priceCheckedAt ? (
+                    <span>
+                      <strong>Price checked:</strong>{" "}
+                      {new Date(recommendation.candidateProduct.priceCheckedAt).toLocaleDateString()}
+                    </span>
                   ) : null}
                   {recommendation.candidateProduct.localAvailability ? (
                     <span><strong>Availability:</strong> {recommendation.candidateProduct.localAvailability}</span>
+                  ) : null}
+                  </div>
+                  {recommendation.candidateProduct.keyIngredients.length > 0 ? (
+                    <div className="candidate-ingredient-list" aria-label="Label highlights">
+                      {recommendation.candidateProduct.keyIngredients.map((ingredient) => (
+                        <span key={ingredient}>{ingredient}</span>
+                      ))}
+                    </div>
+                  ) : null}
+                  {recommendation.candidateProduct.usageNote ? (
+                    <span><strong>Test protocol:</strong> {recommendation.candidateProduct.usageNote}</span>
+                  ) : null}
+                  {recommendation.candidateProduct.lowerCostAlternative ? (
+                    <span><strong>Lower-cost option:</strong> {recommendation.candidateProduct.lowerCostAlternative}</span>
                   ) : null}
                   {recommendation.candidateProduct.affordabilityNote ? (
                     <span>{recommendation.candidateProduct.affordabilityNote}</span>
@@ -2568,16 +2984,21 @@ function ExperimentAiTools({
                   ) : null}
                 </div>
               ) : null}
-              <div className="callout compact">
-                <p className="eyebrow">Foods to consider · {recommendation.nutritionGuidance.focus}</p>
-                <p><strong>{recommendation.nutritionGuidance.suggestion}</strong></p>
-                <div className="food-suggestion-list" aria-label="Foods suggested by AI">
+              <div className="ai-nutrition-card">
+                <div className="ai-nutrition-card-heading">
+                  <div>
+                    <p className="eyebrow">Nutrition observation</p>
+                    <strong>{recommendation.nutritionGuidance.focus}</strong>
+                  </div>
+                  <span className="status-pill">Queue separately</span>
+                </div>
+                <p>{recommendation.nutritionGuidance.suggestion}</p>
+                <div className="nutrition-food-grid" aria-label="Foods suggested by AI">
                   {recommendation.nutritionGuidance.foodsToConsider.map((food) => (
-                    <span key={food}>{food}</span>
+                    <span key={food}><Check size={14} /> {food}</span>
                   ))}
                 </div>
-                <p className="muted">{recommendation.nutritionGuidance.evidenceNote}</p>
-                <p className="fine-print">{recommendation.nutritionGuidance.trackingPrompt}</p>
+                <small>{recommendation.nutritionGuidance.trackingPrompt}</small>
               </div>
               <details className="ai-evidence-details">
                 <summary>Evidence, sources, and safety</summary>
@@ -2605,7 +3026,7 @@ function ExperimentAiTools({
           ) : (
             <p className="muted">
               Generate one acne-focused add, remove, replace, or keep suggestion using experiment
-              evidence, a $25 demo budget, local availability, and sourced nutrition context.
+              evidence, your ${budgetUsd.toFixed(0)} budget, local availability, and sourced nutrition context.
             </p>
           )}
           {recommendationError ? (
@@ -2653,7 +3074,11 @@ function ExperimentAiTools({
                   height={640}
                   unoptimized
                 />
-                <div className="simulation-comparison-after" aria-hidden="true">
+                <div
+                  className="simulation-comparison-after"
+                  role="img"
+                  aria-label="AI-generated illustrative skin appearance based on recorded cosmetic measurements"
+                >
                   <NextImage
                     className="simulation-comparison-image"
                     src={simulationImage}
@@ -2679,6 +3104,7 @@ function ExperimentAiTools({
                 />
               </div>
               <p className="simulation-comparison-help">Drag the slider to compare before and after.</p>
+              <p className="fine-print"><strong>AI-generated illustration</strong> · based on the same scan source shown on the left.</p>
             </>
           ) : simulationImage ? (
             <div className="simulation-loading" role="status">

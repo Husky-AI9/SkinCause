@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+export const AI_ACNE_SEVERITY_CONCERN_KEY = "ai_acne_severity";
+export const AI_ACNE_PATTERN_CONCERN_KEY = "ai_acne_pattern";
+
 export const concernSchema = z.object({
   key: z.string(),
   providerLabel: z.string(),
@@ -127,6 +130,10 @@ export const associationResultSchema = z.object({
   wording: z.string()
 });
 
+export const routineRecommendationRequestSchema = z.object({
+  maxUnitPriceUsd: z.number().finite().min(1).max(500).optional()
+});
+
 export const routineRecommendationSchema = z.object({
   experimentId: z.string().min(1),
   model: z.string().min(1),
@@ -139,9 +146,16 @@ export const routineRecommendationSchema = z.object({
     brand: z.string().min(1).max(120),
     category: z.string().min(1).max(120),
     productUrl: z.string().url().regex(/^https:\/\//i).nullable(),
+    imageUrl: z.string().url().regex(/^https:\/\//i).nullable().default(null),
     estimatedPrice: z.string().min(1).max(80).nullable().default(null),
+    packageSize: z.string().min(1).max(80).nullable().default(null),
+    pricePerUnit: z.string().min(1).max(100).nullable().default(null),
+    priceCheckedAt: z.string().datetime().nullable().default(null),
     localAvailability: z.string().min(1).max(200).nullable().default(null),
-    affordabilityNote: z.string().min(1).max(300).nullable().default(null)
+    affordabilityNote: z.string().min(1).max(300).nullable().default(null),
+    keyIngredients: z.array(z.string().min(1).max(100)).max(4).default([]),
+    usageNote: z.string().min(1).max(300).nullable().default(null),
+    lowerCostAlternative: z.string().min(1).max(200).nullable().default(null)
   }).nullable(),
   summary: z.string().min(1).max(500),
   rationale: z.array(z.string().min(1).max(300)).max(3),
@@ -255,6 +269,7 @@ export type Experiment = z.infer<typeof experimentSchema>;
 export type CreateExperiment = z.infer<typeof createExperimentSchema>;
 export type AssociationComponents = z.infer<typeof associationComponentsSchema>;
 export type AssociationResult = z.infer<typeof associationResultSchema>;
+export type RoutineRecommendationRequest = z.infer<typeof routineRecommendationRequestSchema>;
 export type RoutineRecommendation = z.infer<typeof routineRecommendationSchema>;
 export type SkinSimulationParameters = z.infer<typeof skinSimulationParametersSchema>;
 export type SkinSimulation = z.infer<typeof skinSimulationSchema>;

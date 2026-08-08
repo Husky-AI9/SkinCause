@@ -3,6 +3,9 @@ import {
   calculateLongitudinalAssociation,
   calculateSkinSimulationParameters,
   classifyCosmeticConcern,
+  compareScanConcerns,
+  roundVisibleSeverity,
+  summarizeScanReadiness,
   scans
 } from "@skincause/domain";
 import { describe, expect, it } from "vitest";
@@ -43,11 +46,43 @@ describe("association engine", () => {
 });
 
 describe("cosmetic concern severity", () => {
+  it("formats visible measurement scores as bounded integers", () => {
+    expect(roundVisibleSeverity(47.6)).toBe(48);
+    expect(roundVisibleSeverity(102.4)).toBe(100);
+    expect(roundVisibleSeverity(null)).toBeNull();
+  });
+
   it("maps normalized concern scores to non-diagnostic display labels", () => {
     expect(classifyCosmeticConcern(32)).toEqual({ level: "mild", label: "Lower visible signal" });
     expect(classifyCosmeticConcern(44)).toEqual({ level: "moderate", label: "Middle visible signal" });
     expect(classifyCosmeticConcern(64)).toEqual({ level: "elevated", label: "Higher visible signal" });
     expect(classifyCosmeticConcern(null)).toEqual({ level: "unavailable", label: "Unavailable" });
+  });
+});
+
+describe("scan evidence helpers", () => {
+  it("explains capture readiness without presenting provider confidence", () => {
+    expect(summarizeScanReadiness(scans[0])).toMatchObject({
+      score: 100,
+      label: "Strong capture"
+    });
+    expect(summarizeScanReadiness({
+      ...scans[0],
+      captureWarnings: ["Uneven lighting", "Face angle"],
+      concerns: scans[0].concerns.map((concern, index) =>
+        index === 0 ? { ...concern, normalizedSeverity: null } : concern
+      )
+    }).score).toBe(62);
+  });
+
+  it("keeps small score movement inside a visible comparison threshold", () => {
+    const changes = compareScanConcerns(
+      scans[0],
+      scans.at(-1)!,
+      ["blemish_pattern", "pores"]
+    );
+    expect(changes[0]).toMatchObject({ delta: -22, interpretation: "lower visible signal" });
+    expect(changes[1]).toMatchObject({ delta: -3, interpretation: "within comparison threshold" });
   });
 });
 

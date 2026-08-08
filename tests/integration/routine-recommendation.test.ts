@@ -55,9 +55,16 @@ describe("OpenAI routine recommendation provider", () => {
                   brand: "Example",
                   category: "Moisturizer",
                   productUrl: "https://brand.example.test/product",
+                  imageUrl: "https://brand.example.test/product.jpg",
                   estimatedPrice: "$14.99",
+                  packageSize: "3 fl oz",
+                  pricePerUnit: "$5.00 per fl oz",
+                  priceCheckedAt: "2026-08-07T12:00:00.000Z",
                   localAvailability: "Major US retailers",
-                  affordabilityNote: "Below the configured $25 target at the cited retailer."
+                  affordabilityNote: "Below the configured $25 target at the cited retailer.",
+                  keyIngredients: ["Ceramides"],
+                  usageNote: "Introduce as the only routine change and follow the label.",
+                  lowerCostAlternative: "Keep the current moisturizer."
                 },
                 summary: "Test one replacement.",
                 rationale: ["The experiment supports testing a different routine variable."],
@@ -84,14 +91,17 @@ describe("OpenAI routine recommendation provider", () => {
       "https://api.openai.test/v1"
     );
     const result = await provider.generate({
-      context: buildRecommendationContext(experiment, products),
+      context: buildRecommendationContext(experiment, products, 40),
       idempotencyKey: "stable-key",
       safetyIdentifier: "anonymous-user-hash"
     });
     expect(result).toMatchObject({
       action: "replace",
       existingProductId: products[2].id,
-      candidateProduct: { name: "Barrier moisturizer" },
+      candidateProduct: {
+        name: "Barrier moisturizer",
+        imageUrl: "https://brand.example.test/product.jpg"
+      },
       measurementKeys: ["redness", "texture"],
       sources: [{ url: "https://brand.example.test/product" }]
     });
@@ -101,7 +111,8 @@ describe("OpenAI routine recommendation provider", () => {
     expect(body.tools).toEqual([{ type: "web_search", search_context_size: "low" }]);
     expect(body.tool_choice).toBe("required");
     expect(body.text.format.strict).toBe(true);
-    expect(body.input[1].content).toContain("\"maxUnitPriceUsd\":25");
+    expect(body.text.format.schema.properties.candidateProduct.anyOf[0].required).toContain("imageUrl");
+    expect(body.input[1].content).toContain("\"maxUnitPriceUsd\":40");
     expect(body.input[1].content).not.toContain("notes");
   });
 });

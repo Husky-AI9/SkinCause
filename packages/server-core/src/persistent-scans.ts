@@ -1,4 +1,9 @@
-import type { Concern, Scan, ScanActivityEvent } from "@skincause/contracts";
+import {
+  AI_ACNE_SEVERITY_CONCERN_KEY,
+  type Concern,
+  type Scan,
+  type ScanActivityEvent
+} from "@skincause/contracts";
 import type { SkinAnalysisProvider } from "./index";
 import { scanActivity } from "./scan-activity";
 import {
@@ -252,7 +257,7 @@ export class PersistentScanService {
               ...completionActivity,
               scanActivity(
                 "skincause",
-                `${analysis.result.concerns.length} scores and ${analysis.result.concerns.filter((concern) => concern.maskUrl).length} masks persisted`,
+                `${analysis.result.concerns.filter((concern) => concern.normalizedSeverity !== null).length} scores and ${analysis.result.concerns.filter((concern) => concern.maskUrl).length} masks persisted`,
                 "success"
               )
             ],
@@ -296,7 +301,30 @@ export class PersistentScanService {
     }
 
     if (scan.status === "normalized" || scan.status === "succeeded") {
-      const concerns = await this.repository.listConcerns(ownerId, scanId);
+      let concerns = await this.repository.listConcerns(ownerId, scanId);
+      if (
+        provider?.enrichAcnePattern &&
+        !concerns.some((concern) => concern.key === AI_ACNE_SEVERITY_CONCERN_KEY)
+      ) {
+        try {
+          const enriched = await provider.enrichAcnePattern({
+            id: scan.id,
+            status: scan.status,
+            capturedAt: scan.capturedAt,
+            provider: scan.provider,
+            providerVersion: scan.providerVersion ?? undefined,
+            analysisProfileVersion: scan.analysisProfileVersion,
+            concerns,
+            captureWarnings: []
+          }, `stored-acne-pattern-${scan.id}`);
+          if (enriched.concerns.some((concern) => concern.key === AI_ACNE_SEVERITY_CONCERN_KEY)) {
+            await this.repository.replaceConcerns(ownerId, scanId, enriched.concerns);
+            concerns = enriched.concerns;
+          }
+        } catch {
+          // The original normalized scan remains usable when the optional AI assessment is unavailable.
+        }
+      }
       return {
         scanId,
         status: scan.status,

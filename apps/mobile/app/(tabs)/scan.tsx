@@ -12,6 +12,7 @@ import {
 } from "react-native";
 import { useRouter } from "expo-router";
 import type { LocalImageAsset, Scan } from "@skincause/contracts";
+import { roundVisibleSeverity, summarizeScanReadiness } from "@skincause/domain";
 import { apiOrigin } from "../../src/config";
 import { errorMessage, useMobile } from "../../src/mobile-provider";
 import { colors, Notice, PrimaryButton, Section, styles } from "../../src/ui";
@@ -312,9 +313,12 @@ export default function ScanScreen() {
 
       {result ? (
         <Section title="Visible skin measurements">
+          <Notice>
+            {summarizeScanReadiness(result).label} · {summarizeScanReadiness(result).score}/100 capture readiness. {summarizeScanReadiness(result).note}
+          </Notice>
           <View style={styles.concernList}>
             {concernRows.map((concern) => {
-              const severity = concern.normalizedSeverity ?? 0;
+              const severity = roundVisibleSeverity(concern.normalizedSeverity) ?? 0;
               return (
                 <View key={concern.key} style={styles.concernRow}>
                   <View style={styles.concernHeading}>

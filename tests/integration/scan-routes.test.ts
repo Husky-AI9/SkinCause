@@ -88,6 +88,20 @@ describe("scan route flow", () => {
         provider: "mock"
       }
     });
+    expect(statusPayload.data.result.concerns).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: "ai_acne_severity",
+          normalizedSeverity: expect.any(Number),
+          experimentRole: "primary"
+        }),
+        expect.objectContaining({
+          key: "ai_acne_pattern",
+          displayLabel: expect.any(String),
+          experimentRole: "context"
+        })
+      ])
+    );
   });
 
   it("rejects unknown scan uploads", async () => {

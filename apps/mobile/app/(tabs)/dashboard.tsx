@@ -4,15 +4,18 @@ import { useFocusEffect, useRouter } from "expo-router";
 import type { Experiment, Product, RoutineRecommendation } from "@skincause/contracts";
 import {
   classifyCosmeticConcern,
+  getVisibleAcnePatternAssessment,
   products as seededProducts,
+  roundVisibleSeverity,
   scans,
-  seededExperiment
+  seededExperiment,
+  summarizeScanReadiness
 } from "@skincause/domain";
 import { dailyNutritionTargets } from "../../src/nutrition";
 import { errorMessage, useMobile } from "../../src/mobile-provider";
 import { Notice, PrimaryButton, Section, styles } from "../../src/ui";
 
-const concernOrder = ["blemish_pattern", "redness", "texture", "pores", "oiliness"];
+const concernOrder = ["blemish_pattern", "ai_acne_severity", "redness", "texture", "pores", "oiliness"];
 
 export default function DashboardScreen() {
   const router = useRouter();
@@ -65,13 +68,15 @@ export default function DashboardScreen() {
 
   const displayedScan = latestScan ?? scans[0];
   const concerns = [...displayedScan.concerns]
+    .filter((concern) => concern.normalizedSeverity !== null)
     .sort((left, right) => {
       const leftIndex = concernOrder.indexOf(left.key);
       const rightIndex = concernOrder.indexOf(right.key);
       return (leftIndex < 0 ? 99 : leftIndex) - (rightIndex < 0 ? 99 : rightIndex);
     })
     .slice(0, 5);
-  const acneConcern = concerns.find((concern) => concern.key === "blemish_pattern");
+  const acneAssessment = getVisibleAcnePatternAssessment(displayedScan);
+  const readiness = summarizeScanReadiness(displayedScan);
   const displayedExperiment = experiment ?? seededExperiment;
   const selectedProduct = routine.find(
     (product) => product.id === displayedExperiment.suspectProductId
@@ -85,7 +90,7 @@ export default function DashboardScreen() {
   const measurementKeys =
     recommendation?.measurementKeys ??
     experiment?.primaryConcerns ??
-    ["blemish_pattern", "redness", "texture"];
+    ["ai_acne_severity", "blemish_pattern", "redness"];
   const nutritionMarker = "Nutrition context to track:";
   const experimentHypothesis = displayedExperiment.hypothesis
     .split(`\n\n${nutritionMarker}`)[0];
@@ -154,9 +159,9 @@ export default function DashboardScreen() {
 
       <View style={styles.statsGrid}>
         <View style={styles.metric}>
-          <Text style={styles.metricValue}>{acneConcern?.normalizedSeverity ?? "—"}</Text>
+          <Text style={styles.metricValue}>{acneAssessment.severity?.normalizedSeverity ?? "—"}</Text>
           <Text style={styles.metricLabel}>
-            {classifyCosmeticConcern(acneConcern?.normalizedSeverity ?? null).label}
+            Acne severity · {classifyCosmeticConcern(acneAssessment.severity?.normalizedSeverity ?? null).label}
           </Text>
         </View>
         <View style={styles.metric}>
@@ -166,6 +171,10 @@ export default function DashboardScreen() {
         <View style={styles.metric}>
           <Text style={styles.metricValue}>{displayedExperiment.checkIns.length}</Text>
           <Text style={styles.metricLabel}>experiment check-ins</Text>
+        </View>
+        <View style={styles.metric}>
+          <Text style={styles.metricValue}>{readiness.score}</Text>
+          <Text style={styles.metricLabel}>capture readiness</Text>
         </View>
       </View>
 
@@ -178,9 +187,12 @@ export default function DashboardScreen() {
             year: "numeric"
           })}
         </Text>
+        <Notice>
+          Observed acne pattern: {acneAssessment.visiblePattern ?? "Unclassified visible acne pattern"}.
+        </Notice>
         <View style={styles.concernList}>
           {concerns.map((concern) => {
-            const severity = concern.normalizedSeverity ?? 0;
+            const severity = roundVisibleSeverity(concern.normalizedSeverity) ?? 0;
             return (
               <View style={styles.concernRow} key={concern.key}>
                 <View style={styles.concernHeading}>
@@ -247,7 +259,7 @@ export default function DashboardScreen() {
 
       <Section title="Daily nutrition plan">
         <Text style={styles.body}>
-          Practical serving targets to keep nutrition observable while the experiment runs.
+          Practical serving targets for a separate nutrition observation. Keep them stable while a product experiment runs.
         </Text>
         {nutritionFocus ? (
           <Notice>

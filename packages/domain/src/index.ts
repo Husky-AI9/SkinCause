@@ -7,6 +7,10 @@ import type {
   Scan,
   SkinSimulationParameters
 } from "@skincause/contracts";
+import {
+  AI_ACNE_PATTERN_CONCERN_KEY,
+  AI_ACNE_SEVERITY_CONCERN_KEY
+} from "@skincause/contracts";
 
 export const persistentDisclaimer =
   "SkinCause provides cosmetic tracking and organizational insights, not medical diagnosis or treatment. Results may be affected by lighting, camera quality, routine adherence, time, and other changes.";
@@ -36,6 +40,10 @@ export const acneNutritionGuardrails = [
 
 export type CosmeticConcernLevel = "mild" | "moderate" | "elevated" | "unavailable";
 
+export function roundVisibleSeverity(value: number | null) {
+  return value === null ? null : Math.max(0, Math.min(100, Math.round(value)));
+}
+
 export function classifyCosmeticConcern(
   normalizedSeverity: number | null
 ): { level: CosmeticConcernLevel; label: string } {
@@ -49,6 +57,91 @@ export function classifyCosmeticConcern(
     return { level: "moderate", label: "Middle visible signal" };
   }
   return { level: "elevated", label: "Higher visible signal" };
+}
+
+export type ScanReadiness = {
+  score: number;
+  label: "Strong capture" | "Usable capture" | "Review capture";
+  note: string;
+};
+
+/**
+ * A transparent capture-readiness heuristic, not statistical model confidence.
+ * Provider warnings and unavailable measurements reduce the score so clients can
+ * explain why a follow-up may be less comparable before an experiment starts.
+ */
+export function summarizeScanReadiness(
+  scan: Pick<Scan, "captureWarnings" | "concerns">
+): ScanReadiness {
+  const unavailable = scan.concerns.filter(
+    (concern) => concern.experimentRole !== "context" && concern.normalizedSeverity === null
+  ).length;
+  const score = Math.max(
+    40,
+    Math.min(100, 100 - scan.captureWarnings.length * 15 - unavailable * 8)
+  );
+  if (score >= 90) {
+    return {
+      score,
+      label: "Strong capture",
+      note: ""
+    };
+  }
+  if (score >= 70) {
+    return {
+      score,
+      label: "Usable capture",
+      note: "Usable as a baseline, with capture differences kept visible as a limitation."
+    };
+  }
+  return {
+    score,
+    label: "Review capture",
+    note: "Retake in even front lighting before relying on this image as an experiment baseline."
+  };
+}
+
+export type ConcernChange = {
+  key: string;
+  baseline: number;
+  latest: number;
+  delta: number;
+  interpretation: "lower visible signal" | "higher visible signal" | "within comparison threshold";
+};
+
+/**
+ * Compares normalized severity using a visible, configurable threshold. This is
+ * deliberately not a clinical significance test or a claim of causation.
+ */
+export function compareScanConcerns(
+  baseline: Scan,
+  latest: Scan,
+  keys: string[],
+  comparisonThreshold = 5
+): ConcernChange[] {
+  const baselineByKey = new Map(
+    baseline.concerns.map((concern) => [concern.key, concern.normalizedSeverity])
+  );
+  const latestByKey = new Map(
+    latest.concerns.map((concern) => [concern.key, concern.normalizedSeverity])
+  );
+  return keys.flatMap((key) => {
+    const before = baselineByKey.get(key);
+    const after = latestByKey.get(key);
+    if (before === null || before === undefined || after === null || after === undefined) return [];
+    const delta = Math.round((after - before) * 10) / 10;
+    return [{
+      key,
+      baseline: before,
+      latest: after,
+      delta,
+      interpretation: Math.abs(delta) < comparisonThreshold
+        ? "within comparison threshold" as const
+        : delta < 0
+          ? "lower visible signal" as const
+          : "higher visible signal" as const
+    }];
+  });
 }
 
 const clampPercent = (value: number) => Math.max(0, Math.min(100, Math.round(value)));
@@ -254,6 +347,44 @@ function mockConcern(key: keyof typeof mockConcernDefinitions, severity: number)
   };
 }
 
+function mockAiAcneAssessment(severity: number, visiblePattern: string): Concern[] {
+  return [
+    {
+      key: AI_ACNE_SEVERITY_CONCERN_KEY,
+      providerLabel: "AI visible acne-pattern severity",
+      displayLabel: "Acne severity",
+      rawScore: severity,
+      uiScore: severity,
+      normalizedSeverity: severity,
+      directionSource: "configured",
+      experimentRole: "primary"
+    },
+    {
+      key: AI_ACNE_PATTERN_CONCERN_KEY,
+      providerLabel: "AI observed blemish pattern",
+      displayLabel: visiblePattern,
+      rawScore: null,
+      uiScore: null,
+      normalizedSeverity: null,
+      directionSource: "unknown",
+      experimentRole: "context"
+    }
+  ];
+}
+
+export function getVisibleAcnePatternAssessment(scan: Scan) {
+  const severity = scan.concerns.find(
+    (concern) => concern.key === AI_ACNE_SEVERITY_CONCERN_KEY
+  ) ?? null;
+  const pattern = scan.concerns.find(
+    (concern) => concern.key === AI_ACNE_PATTERN_CONCERN_KEY
+  ) ?? null;
+  return {
+    severity,
+    visiblePattern: pattern?.displayLabel ?? null
+  };
+}
+
 export const scans: Scan[] = [
   {
     id: "scan-baseline",
@@ -270,7 +401,8 @@ export const scans: Scan[] = [
       mockConcern("pores", 42),
       mockConcern("oiliness", 45),
       mockConcern("hydration", 50),
-      mockConcern("radiance", 48)
+      mockConcern("radiance", 48),
+      ...mockAiAcneAssessment(61, "Redness-dominant acne pattern")
     ]
   },
   {
@@ -288,7 +420,8 @@ export const scans: Scan[] = [
       mockConcern("pores", 41),
       mockConcern("oiliness", 42),
       mockConcern("hydration", 45),
-      mockConcern("radiance", 44)
+      mockConcern("radiance", 44),
+      ...mockAiAcneAssessment(53, "Mixed redness, pore, and texture acne pattern")
     ]
   },
   {
@@ -306,7 +439,8 @@ export const scans: Scan[] = [
       mockConcern("pores", 40),
       mockConcern("oiliness", 40),
       mockConcern("hydration", 40),
-      mockConcern("radiance", 40)
+      mockConcern("radiance", 40),
+      ...mockAiAcneAssessment(44, "Mixed redness, pore, and texture acne pattern")
     ]
   },
   {
@@ -324,7 +458,8 @@ export const scans: Scan[] = [
       mockConcern("pores", 39),
       mockConcern("oiliness", 38),
       mockConcern("hydration", 36),
-      mockConcern("radiance", 35)
+      mockConcern("radiance", 35),
+      ...mockAiAcneAssessment(39, "Mixed redness, pore, and texture acne pattern")
     ]
   }
 ];
@@ -340,7 +475,7 @@ export const seededResult = calculateAssociation({
     confounderPenalty: 8,
     qualityPenalty: 2
   },
-  usedConcerns: ["blemish_pattern", "redness", "texture"],
+  usedConcerns: [AI_ACNE_SEVERITY_CONCERN_KEY, "blemish_pattern", "redness"],
   limitations: [
     "One check-in included unusual sun exposure.",
     "Camera and lighting differences can affect measured skin scores."
@@ -373,7 +508,11 @@ export const seededExperiment = {
   startedAt: "2026-06-09T08:00:00.000Z",
   endedAt: "2026-06-24T08:00:00.000Z",
   suspectProductId: "brightening-serum",
-  hypothesis: "Observe whether visible acne, redness, and texture signals change while the serum is paused.",
+  suspectProductName: "Brightening Serum",
+  baselineScanId: "scan-baseline",
+  analysisProfileVersion: "routine-sd-v1",
+  primaryConcerns: [AI_ACNE_SEVERITY_CONCERN_KEY, "blemish_pattern", "redness"],
+  hypothesis: "Observe whether acne severity, visible blemishes, and redness change while the serum is paused.",
   checkIns: [
     { id: "checkin-1", date: "Jun 13", day: 4, adherence: 100, observation: 7, confounder: null, scanId: "scan-followup-1" },
     { id: "checkin-2", date: "Jun 18", day: 9, adherence: 100, observation: 5, confounder: "Unusual sun exposure", scanId: "scan-followup-2" },

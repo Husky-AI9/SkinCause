@@ -1,4 +1,7 @@
 import {
+  routineRecommendationRequestSchema
+} from "@skincause/contracts";
+import {
   acneNutritionGuardrails,
   defaultAcneGuidancePreferences,
   routineRecommendationDisclaimer,
@@ -7,6 +10,7 @@ import {
 } from "@skincause/domain";
 import {
   MockRoutineRecommendationProvider,
+  failure,
   success,
   type RecommendationEvidenceContext
 } from "@skincause/server-core";
@@ -40,6 +44,17 @@ export async function POST(
 ) {
   try {
     const { id } = await context.params;
+    const parsed = routineRecommendationRequestSchema.safeParse(
+      await request.json().catch(() => ({}))
+    );
+    if (!parsed.success) {
+      return Response.json(
+        failure("VALIDATION_FAILED", "Enter a product budget between $1 and $500.", true),
+        { status: 400 }
+      );
+    }
+    const maxUnitPriceUsd =
+      parsed.data.maxUnitPriceUsd ?? defaultAcneGuidancePreferences.maxUnitPriceUsd;
     const actor = await resolveRequestActor(request);
     if (actor.kind === "guest") {
       const provider = new MockRoutineRecommendationProvider();
@@ -50,7 +65,7 @@ export async function POST(
           status: seededExperiment.status,
           suspectProductId: seededExperiment.suspectProductId,
           suspectProductName: "Brightening Serum",
-          primaryConcerns: ["blemish_pattern", "redness", "texture"],
+          primaryConcerns: [...seededExperiment.primaryConcerns],
           result: seededExperiment.result
         },
         products: products.map(({ id: productId, name, category, active, recentlyChanged }) => ({
@@ -62,7 +77,8 @@ export async function POST(
         })),
         guidancePreferences: {
           market: defaultAcneGuidancePreferences.market,
-          maxUnitPriceUsd: defaultAcneGuidancePreferences.maxUnitPriceUsd,
+          maxUnitPriceUsd,
+          priceVerificationDate: new Date().toISOString().slice(0, 10),
           priorities: [...defaultAcneGuidancePreferences.priorities],
           nutritionGuardrails: [...acneNutritionGuardrails]
         }
@@ -88,7 +104,7 @@ export async function POST(
       workspace.listProducts(actor.userId)
     ]);
     const recommendation = await createPersistentRoutineRecommendationService(actor)
-      .generate(actor.userId, experiment, routineProducts);
+      .generate(actor.userId, experiment, routineProducts, maxUnitPriceUsd);
     return Response.json(success(recommendation));
   } catch (error) {
     return persistenceErrorResponse(error, "The routine suggestion could not be generated.");

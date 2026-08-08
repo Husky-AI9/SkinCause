@@ -21,10 +21,8 @@ test("analyze skin opens a prepared demo scan and workspace navigation", async (
   expect(previewBounds).not.toBeNull();
   expect(captureBounds).not.toBeNull();
   expect(Math.abs(previewBounds!.height - captureBounds!.height)).toBeLessThanOrEqual(2);
-  await expect(page.getByText("skincause-asian-skin-test.png", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Live execution log" })).toBeVisible();
   await expect(page.getByText(/\[client\] validated image\/png;/)).toBeVisible();
-  await expect(page.getByText("Ready", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Analyze demo image" })).toBeEnabled();
   if (testInfo.project.name === "mobile") {
     await page.getByRole("button", { name: "Open navigation" }).click();
@@ -33,10 +31,11 @@ test("analyze skin opens a prepared demo scan and workspace navigation", async (
   await expect(page.getByRole("button", { name: "Exit demo" })).toBeVisible();
 
   await page.getByRole("link", { name: "Acne plan" }).click();
-  await expect(page.getByRole("heading", { name: "Visible acne-pattern trend" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Acne plan" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Visible skin measurements" })).toBeVisible();
   await expect(page.getByText("Completed").first()).toBeVisible();
-  await page.getByRole("link", { name: /Open acne plan/ }).click();
-  await expect(page.getByRole("heading", { name: "Turn the acne scan into one affordable, testable plan" })).toBeVisible();
+  await page.getByRole("link", { name: "Plan experiment" }).click();
+  await expect(page.getByRole("heading", { name: "Plan one clear change" })).toBeVisible();
 });
 
 test("consent gates the guided flow", async ({ page }) => {
@@ -68,27 +67,31 @@ test("authentication screen exposes sign-in and account creation states", async 
 test("experiment studio suggests a replacement and generates an illustration", async ({ page }) => {
   await page.goto("/experiments/new?from=brightening-serum-elimination");
   await expect(
-    page.getByRole("heading", { name: "Turn the acne scan into one affordable, testable plan" })
+    page.getByRole("heading", { name: "Plan one clear change" })
   ).toBeVisible();
 
   await page.getByRole("button", { name: "AI routine suggestion" }).click();
-  await expect(page.getByText("Replace one product", { exact: true })).toBeVisible();
+  await expect(
+    page.locator("#ai-plan-panel").getByText("Replace one product", { exact: true })
+  ).toBeVisible();
   await expect(page.getByText("Suggested candidate", { exact: true })).toBeVisible();
   await expect(
-    page.getByText("Demo catalog Fragrance-free barrier moisturizer", { exact: true })
+    page.getByText("Vanicream Daily Facial Moisturizer", { exact: true }).first()
   ).toBeVisible();
-  await expect(page.getByText(/Price:.*Target: \$25 or less/)).toBeVisible();
-  await expect(page.getByText(/Nutrition context/).first()).toBeVisible();
+  await expect(page.getByText(/Price:.*\$13\.99/)).toBeVisible();
+  await expect(page.getByText(/Queue next/).first()).toBeVisible();
   await expect(page.getByLabel("Suspect product")).toHaveValue("__ai_candidate_product__");
   await expect(page.getByRole("button", { name: "Add / replace product" })).toHaveClass(/is-active/);
-  await expect(page.getByLabel("Redness")).toBeChecked();
-  await expect(page.getByLabel("Texture")).toBeChecked();
+  await expect(page.getByLabel("Visible redness pattern")).toBeChecked();
+  await expect(page.getByLabel("Texture variation")).toBeChecked();
 
+  await page.getByRole("tab", { name: "Skin simulation" }).click();
   await page.getByRole("button", { name: "Generate illustration" }).click();
+  await expect(page.locator(".simulation-comparison")).toBeVisible({ timeout: 15_000 });
   await expect(
     page.getByRole("img", {
       name: "AI-generated illustrative skin appearance based on recorded cosmetic measurements"
     })
-  ).toBeVisible({ timeout: 15_000 });
+  ).toHaveCount(1);
   await expect(page.getByText("AI-generated illustration", { exact: true })).toBeVisible();
 });
