@@ -12,6 +12,7 @@ function wait(milliseconds: number) {
 }
 
 export async function POST(request: Request) {
+  let stage = "validate_request";
   try {
     const clientRequestId = request.headers.get("x-client-request-id");
     if (!clientRequestId) {
@@ -27,6 +28,7 @@ export async function POST(request: Request) {
       );
     }
 
+    stage = "read_image";
     const image = new Uint8Array(await request.arrayBuffer());
     if (image.byteLength === 0 || image.byteLength >= 4_000_000) {
       return Response.json(
@@ -34,19 +36,24 @@ export async function POST(request: Request) {
         { status: 400 }
       );
     }
+    stage = "create_provider";
     const provider = createSkinAnalysisProvider();
+    stage = "create_session";
     const session = serverServices.createUploadSession(`demo-${clientRequestId}`, {
       mimeType: "image/png",
       byteSize: image.byteLength
     });
+    stage = "store_image";
     const stored = serverServices.storeScanImage(session.scanId, image, "image/png");
     if (stored !== true) {
       throw new Error("DEMO_IMAGE_STORE_FAILED");
     }
 
+    stage = "submit_analysis";
     let status = await serverServices.submitScan(session.scanId, provider, undefined, "upload");
     const deadline = Date.now() + 50_000;
     while (status?.status === "processing" && Date.now() < deadline) {
+      stage = "poll_analysis";
       await wait(status.pollAfterMs ?? 1_500);
       status = await serverServices.getScan(session.scanId, provider);
     }
@@ -76,7 +83,11 @@ export async function POST(request: Request) {
     return Response.json(success(status));
   } catch {
     return Response.json(
-      failure("DEMO_ANALYSIS_UNAVAILABLE", "The demo analysis is temporarily unavailable.", true),
+      failure(
+        `DEMO_ANALYSIS_${stage.toUpperCase()}_FAILED`,
+        "The demo analysis is temporarily unavailable.",
+        true
+      ),
       { status: 503 }
     );
   }
