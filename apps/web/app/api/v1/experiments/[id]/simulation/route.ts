@@ -1,7 +1,13 @@
-import { calculateSkinSimulationParameters, scans, skinSimulationDisclaimer } from "@skincause/domain";
-import { success } from "@skincause/server-core";
+import {
+  calculateSkinSimulationParameters,
+  scans,
+  seededExperiment,
+  skinSimulationDisclaimer
+} from "@skincause/domain";
+import { failure, success } from "@skincause/server-core";
 import {
   deleteGuestSkinSimulation,
+  generateGuestSkinSimulationImage,
   getGuestSkinSimulation,
   startGuestSkinSimulation
 } from "../../../../../../lib/guest-skin-simulation";
@@ -16,12 +22,15 @@ import {
 const imagePath = (id: string) =>
   `/api/v1/experiments/${encodeURIComponent(id)}/simulation/image`;
 
+export const maxDuration = 60;
+
 export async function GET(
   request: Request,
   context: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id } = await context.params;
+    if (id === seededExperiment.id) return Response.json(success(null));
     const actor = await resolveRequestActor(request);
     if (actor.kind === "guest") {
       if (process.env.YOUCAM_MOCK_MODE !== "false") return Response.json(success(null));
@@ -49,6 +58,39 @@ export async function POST(
 ) {
   try {
     const { id } = await context.params;
+    if (id === seededExperiment.id && request.headers.get("content-type") === "image/png") {
+      try {
+        const sourceImage = new Uint8Array(await request.arrayBuffer());
+        if (sourceImage.byteLength === 0 || sourceImage.byteLength >= 4_000_000) {
+          return Response.json(
+            failure("SIMULATION_SOURCE_INVALID", "The demo source image is invalid.", false),
+            { status: 400 }
+          );
+        }
+        const result = await generateGuestSkinSimulationImage(sourceImage, "image/png");
+        const generatedAt = new Date();
+        return new Response(result.image.slice().buffer as ArrayBuffer, {
+          headers: {
+            "content-type": result.mimeType,
+            "cache-control": "private, no-store",
+            "content-security-policy": "default-src 'none'; sandbox",
+            "x-skincause-generated-at": generatedAt.toISOString(),
+            "x-skincause-expires-at": new Date(
+              generatedAt.getTime() + 90 * 60 * 1000
+            ).toISOString()
+          }
+        });
+      } catch {
+        return Response.json(
+          failure(
+            "SIMULATION_PROVIDER_FAILED",
+            "YouCam could not generate the demo illustration. Try again.",
+            true
+          ),
+          { status: 502 }
+        );
+      }
+    }
     const actor = await resolveRequestActor(request);
     if (actor.kind === "guest") {
       if (process.env.YOUCAM_MOCK_MODE === "false") {
@@ -89,6 +131,10 @@ export async function DELETE(
 ) {
   try {
     const { id } = await context.params;
+    if (id === seededExperiment.id) {
+      deleteGuestSkinSimulation();
+      return Response.json(success({ experimentId: id, imageDeleted: true }));
+    }
     const actor = await resolveRequestActor(request);
     if (actor.kind === "guest") {
       deleteGuestSkinSimulation();

@@ -11,12 +11,14 @@ import {
   type SkinSimulation
 } from "@skincause/contracts";
 import {
+  calculateSkinSimulationParameters,
   classifyCosmeticConcern,
   compareScanConcerns,
   getVisibleAcnePatternAssessment,
   insufficientResult,
   seededExperiment,
   scans,
+  skinSimulationDisclaimer,
   persistentDisclaimer,
   roundVisibleSeverity,
   summarizeScanReadiness
@@ -2817,6 +2819,44 @@ function ExperimentAiTools({
     setSimulationSourceBlobUrl("");
     setComparisonPosition(50);
     try {
+      if ((authStatus === "guest" || authStatus === "demo") && id === experimentId) {
+        const sourceResponse = await fetch("/images/demo-face-acne.png");
+        if (!sourceResponse.ok) throw new Error("The demo source image could not be loaded.");
+        const sourceImage = await sourceResponse.blob();
+        const response = await apiFetch(
+          `/api/v1/experiments/${encodeURIComponent(id)}/simulation`,
+          {
+            method: "POST",
+            headers: { "content-type": "image/png" },
+            body: sourceImage
+          }
+        );
+        if (!response.ok) {
+          const payload = (await response.json().catch(() => null)) as {
+            error?: { message?: string };
+          } | null;
+          throw new Error(payload?.error?.message ?? "The illustration could not be generated.");
+        }
+        const generatedImage = await response.blob();
+        const objectUrl = URL.createObjectURL(generatedImage);
+        setSimulationBlobUrl((current) => {
+          if (current.startsWith("blob:")) URL.revokeObjectURL(current);
+          return objectUrl;
+        });
+        const generatedAt = response.headers.get("x-skincause-generated-at") ?? new Date().toISOString();
+        setSimulation({
+          experimentId: id,
+          status: "succeeded",
+          provider: "youcam",
+          sourceScanId: scans[0].id,
+          targetScanId: scans.at(-1)!.id,
+          parameters: calculateSkinSimulationParameters(scans[0], scans.at(-1)!),
+          generatedAt,
+          expiresAt: response.headers.get("x-skincause-expires-at"),
+          disclaimer: skinSimulationDisclaimer
+        });
+        return;
+      }
       if (regenerate) {
         const deleted = await apiFetch(
           `/api/v1/experiments/${encodeURIComponent(id)}/simulation`,

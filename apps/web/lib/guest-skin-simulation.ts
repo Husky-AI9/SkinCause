@@ -220,3 +220,40 @@ export function readGuestSkinSimulationImage() {
 export function deleteGuestSkinSimulation() {
   simulationGlobal.__skincauseGuestSimulationV2 = undefined;
 }
+
+export async function generateGuestSkinSimulationImage(
+  image: Uint8Array,
+  mimeType: "image/jpeg" | "image/png"
+) {
+  const simulationProvider = provider();
+  const generationId = crypto.randomUUID();
+  const uploaded = await simulationProvider.uploadSourceImage({
+    image,
+    mimeType,
+    fileName: mimeType === "image/png" ? "skincause-demo-face.png" : "skincause-demo-face.jpg",
+    idempotencyKey: `skincause-demo-source-v4-${generationId}`
+  });
+  const started = await simulationProvider.start({
+    sourceFileId: uploaded.sourceFileId,
+    parameters,
+    idempotencyKey: `skincause-demo-improvement-v4-${generationId}`
+  });
+  const deadline = Date.now() + 50_000;
+  while (Date.now() < deadline) {
+    const result = await simulationProvider.get(started.externalTaskId);
+    if (result.status === "failed") throw new Error(result.code);
+    if (result.status === "succeeded") {
+      const response = await fetch(result.resultUrl, { redirect: "error" });
+      if (!response.ok) throw new Error("SIMULATION_IMAGE_DOWNLOAD_FAILED");
+      const generatedImage = new Uint8Array(await response.arrayBuffer());
+      if (generatedImage.byteLength === 0 || generatedImage.byteLength > 10_000_000) {
+        throw new Error("SIMULATION_IMAGE_SIZE_INVALID");
+      }
+      const generatedMimeType = imageMimeType(generatedImage);
+      if (!generatedMimeType) throw new Error("SIMULATION_IMAGE_FORMAT_INVALID");
+      return { image: generatedImage, mimeType: generatedMimeType };
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+  }
+  throw new Error("SIMULATION_TIMED_OUT");
+}

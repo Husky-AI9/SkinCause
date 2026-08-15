@@ -1,4 +1,5 @@
 import { failure } from "@skincause/server-core";
+import { seededExperiment } from "@skincause/domain";
 import { readGuestSkinSimulationImage } from "../../../../../../../lib/guest-skin-simulation";
 import { persistenceErrorResponse } from "../../../../../../../lib/route-errors";
 import {
@@ -13,6 +14,22 @@ export async function GET(
 ) {
   try {
     const { id } = await context.params;
+    if (id === seededExperiment.id) {
+      const guestImage = readGuestSkinSimulationImage();
+      if (!guestImage) {
+        return Response.json(
+          failure("SIMULATION_IMAGE_NOT_FOUND", "The demo image is unavailable or expired.", false),
+          { status: 404 }
+        );
+      }
+      return new Response(guestImage.image.slice().buffer as ArrayBuffer, {
+        headers: {
+          "content-type": guestImage.mimeType,
+          "cache-control": "private, no-store",
+          "content-security-policy": "default-src 'none'; sandbox"
+        }
+      });
+    }
     const actor = await resolveRequestActor(request);
     if (actor.kind === "guest") {
       const guestImage = readGuestSkinSimulationImage();
