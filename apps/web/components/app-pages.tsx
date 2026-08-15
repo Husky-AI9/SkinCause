@@ -449,7 +449,7 @@ export function LegacyDashboardPage() {
     setDeleteError("");
     try {
       if (demoMode) {
-        await exitDemo();
+        await exitDemo({ requireRemoteDeletion: true });
       } else {
         if (authStatus === "authenticated") {
           await readApiResponse(await apiFetch("/api/v1/account", { method: "DELETE" }));
@@ -729,7 +729,7 @@ export function DashboardPage() {
     setDeleteError("");
     try {
       if (demoMode) {
-        await exitDemo();
+        await exitDemo({ requireRemoteDeletion: true });
       } else {
         if (authStatus === "authenticated") {
           await readApiResponse(await apiFetch("/api/v1/account", { method: "DELETE" }));
@@ -1113,7 +1113,8 @@ export function ProductsPage() {
 
 export function ScanPage() {
   const router = useRouter();
-  const { apiFetch, demoMode, retainImages } = useAppState();
+  const searchParams = useSearchParams();
+  const { apiFetch, demoMode, enterDemo, retainImages } = useAppState();
   const fileRef = useRef<HTMLInputElement>(null);
   const [fileName, setFileName] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -1125,6 +1126,19 @@ export function ScanPage() {
   const [error, setError] = useState("");
   const [status, setStatus] = useState<ScanWorkflowStatus>("idle");
   const [activity, setActivity] = useState<ScanActivityEvent[]>([]);
+
+  useEffect(() => {
+    if (searchParams.get("demo") !== "true") return;
+    let active = true;
+    void enterDemo()
+      .catch(() => undefined)
+      .finally(() => {
+        if (active) router.replace("/scan/new");
+      });
+    return () => {
+      active = false;
+    };
+  }, [enterDemo, router, searchParams]);
 
   useEffect(() => {
     const activeId = window.localStorage.getItem("skincause-active-scan");

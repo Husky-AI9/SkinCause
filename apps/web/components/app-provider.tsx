@@ -13,6 +13,10 @@ type AppState = {
   checkInSaved: boolean;
 };
 
+type ExitDemoOptions = {
+  requireRemoteDeletion?: boolean;
+};
+
 type AppContextValue = AppState & {
   authStatus: "loading" | "guest" | "demo" | "authenticated";
   demoMode: boolean;
@@ -28,7 +32,7 @@ type AppContextValue = AppState & {
   signUp(email: string, password: string): Promise<{ confirmationRequired: boolean }>;
   signOut(): Promise<void>;
   enterDemo(): Promise<void>;
-  exitDemo(): Promise<void>;
+  exitDemo(options?: ExitDemoOptions): Promise<void>;
   apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
 };
 
@@ -176,23 +180,27 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setDemoMode(true);
       return;
     }
-    if (process.env.NEXT_PUBLIC_SUPABASE_ANONYMOUS_ENABLED !== "true") {
-      if (["localhost", "127.0.0.1"].includes(window.location.hostname)) {
-        setAuthStatus("guest");
-        setDemoMode(true);
+
+    const { data: current, error: sessionError } = await client.auth.getSession();
+    if (!sessionError && current.session) {
+      const { data: verified, error: verificationError } = await client.auth.getUser(
+        current.session.access_token
+      );
+      if (!verificationError && verified.user) {
+        if (verified.user.is_anonymous === true) {
+          setAuthStatus("demo");
+          setDemoMode(true);
+        } else {
+          setAuthStatus("authenticated");
+          setDemoMode(false);
+        }
         return;
       }
-      throw new Error("The demo workspace is not configured.");
+      await client.auth.signOut({ scope: "local" }).catch(() => undefined);
     }
 
-    const { data: current } = await client.auth.getSession();
-    if (current.session && current.session.user.is_anonymous !== true) {
-      setAuthStatus("authenticated");
-      setDemoMode(false);
-      return;
-    }
-    if (current.session?.user.is_anonymous === true) {
-      setAuthStatus("demo");
+    if (process.env.NEXT_PUBLIC_SUPABASE_ANONYMOUS_ENABLED !== "true") {
+      setAuthStatus("guest");
       setDemoMode(true);
       return;
     }
@@ -201,52 +209,65 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       options: { data: { display_name: "Demo investigator" } }
     });
     if (error) {
-      if (["localhost", "127.0.0.1"].includes(window.location.hostname)) {
-        setAuthStatus("guest");
-        setDemoMode(true);
-        return;
-      }
-      throw new Error("The demo workspace is temporarily unavailable.");
+      await client.auth.signOut({ scope: "local" }).catch(() => undefined);
+      setAuthStatus("guest");
+      setDemoMode(true);
+      return;
     }
     setAuthStatus("demo");
     setDemoMode(true);
   }, []);
 
-  const exitDemo = useCallback(async () => {
+  const exitDemo = useCallback(async (options?: ExitDemoOptions) => {
     window.localStorage.removeItem("skincause-active-scan");
     window.localStorage.removeItem("skincause-latest-scan");
     window.localStorage.removeItem("skincause-active-experiment");
     window.localStorage.removeItem("skincause-latest-scan-result");
     window.localStorage.removeItem("skincause-planned-ai-experiment");
+    let remoteDeletionError: Error | null = null;
     const client = getSupabaseBrowserClient();
     if (client) {
-      const { data } = await client.auth.getSession();
-      if (data.session?.user.is_anonymous === true) {
-        const deletion = await fetch("/api/v1/account", {
-          method: "DELETE",
-          headers: { authorization: `Bearer ${data.session.access_token}` }
-        });
-        if (!deletion.ok) throw new Error("The temporary demo data could not be deleted.");
-        const { error } = await client.auth.signOut({ scope: "local" });
-        if (error) throw new Error(error.message);
+      try {
+        const { data, error: sessionError } = await client.auth.getSession();
+        if (sessionError) throw sessionError;
+        if (data.session?.user.is_anonymous === true) {
+          const deletion = await fetch("/api/v1/account", {
+            method: "DELETE",
+            headers: { authorization: `Bearer ${data.session.access_token}` }
+          });
+          if (!deletion.ok) {
+            remoteDeletionError = new Error("The temporary demo data could not be deleted.");
+          }
+          const { error: signOutError } = await client.auth.signOut({ scope: "local" });
+          if (signOutError && !remoteDeletionError) {
+            remoteDeletionError = new Error(signOutError.message);
+          }
+        }
+      } catch (error) {
+        remoteDeletionError = error instanceof Error
+          ? error
+          : new Error("The temporary demo session could not be cleared.");
       }
     }
     setAuthStatus("guest");
     setDemoMode(false);
     setState(initialState);
+    if (options?.requireRemoteDeletion && remoteDeletionError) {
+      throw remoteDeletionError;
+    }
   }, []);
 
   const apiFetch = useCallback(async (input: RequestInfo | URL, init?: RequestInit) => {
     const client = getSupabaseBrowserClient();
     const headers = new Headers(init?.headers);
-    if (client) {
+    if (client && (authStatus === "authenticated" || authStatus === "demo")) {
       const { data } = await client.auth.getSession();
       if (data.session?.access_token) {
         headers.set("authorization", `Bearer ${data.session.access_token}`);
       }
     }
     return fetch(input, { ...init, headers });
-  }, []);
+  }, [authStatus]);
 
   const addProduct = useCallback(async (product: Omit<Product, "id">) => {
     if (authStatus === "authenticated") {

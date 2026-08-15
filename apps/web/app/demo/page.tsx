@@ -1,5 +1,5 @@
-import { DemoEntryPage } from "@/components/demo-entry-page";
+import { redirect } from "next/navigation";
 
 export default function Page() {
-  return <DemoEntryPage />;
+  redirect("/scan/new?demo=true");
 }

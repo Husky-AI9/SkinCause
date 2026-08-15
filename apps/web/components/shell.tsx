@@ -107,7 +107,9 @@ export function AppHeader() {
               type="button"
               onClick={() => {
                 setOpen(false);
-                void exitDemo().finally(() => router.push("/"));
+                void exitDemo()
+                  .catch(() => undefined)
+                  .finally(() => router.push("/"));
               }}
             >
               <LogOut size={17} aria-hidden="true" />

@@ -48,7 +48,7 @@ export default function HomePage() {
               whether the real measurements change without hiding uncertainty.
             </p>
             <div className="landing-actions">
-              <Link className="button landing-primary-action" href="/demo">
+              <Link className="button landing-primary-action" href="/scan/new?demo=true">
                 Start acne analysis <ArrowRight size={18} />
               </Link>
               <Link className="landing-text-link" href="/auth">
@@ -153,7 +153,7 @@ export default function HomePage() {
           <p className="landing-kicker">Your image. Your timeline. Your control.</p>
           <h2 id="final-title">Try the acne scan, affordable recommendation, and simulation journey.</h2>
         </div>
-        <Link className="button" href="/demo">Open the demo <ArrowRight size={18} /></Link>
+        <Link className="button" href="/scan/new?demo=true">Open the demo <ArrowRight size={18} /></Link>
       </section>
     </main>
   );
