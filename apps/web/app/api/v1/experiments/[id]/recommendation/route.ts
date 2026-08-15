@@ -1,5 +1,6 @@
 import {
-  routineRecommendationRequestSchema
+  routineRecommendationRequestSchema,
+  type Experiment
 } from "@skincause/contracts";
 import {
   acneNutritionGuardrails,
@@ -10,16 +11,54 @@ import {
 } from "@skincause/domain";
 import {
   MockRoutineRecommendationProvider,
+  PersistentRoutineRecommendationService,
   failure,
   success,
-  type RecommendationEvidenceContext
+  type RecommendationEvidenceContext,
+  type RoutineRecommendationRepository,
+  type StoredRoutineRecommendation
 } from "@skincause/server-core";
 import { persistenceErrorResponse } from "../../../../../../lib/route-errors";
 import {
   createPersistentRoutineRecommendationService,
   createPersistentWorkspaceService,
+  createRoutineRecommendationProvider,
   resolveRequestActor
 } from "../../../../../../lib/supabase-server";
+
+export const maxDuration = 60;
+
+class RequestRecommendationRepository implements RoutineRecommendationRepository {
+  private record: StoredRoutineRecommendation | null = null;
+
+  async find(ownerId: string, experimentId: string) {
+    return this.record?.ownerId === ownerId && this.record.experimentId === experimentId
+      ? this.record
+      : null;
+  }
+
+  async upsert(record: StoredRoutineRecommendation) {
+    this.record = record;
+    return record;
+  }
+}
+
+const demoExperiment: Experiment = {
+  id: seededExperiment.id,
+  name: seededExperiment.name,
+  type: seededExperiment.type,
+  status: seededExperiment.status,
+  startedAt: seededExperiment.startedAt,
+  endedAt: seededExperiment.endedAt,
+  suspectProductId: seededExperiment.suspectProductId,
+  suspectProductName: seededExperiment.suspectProductName,
+  hypothesis: seededExperiment.hypothesis,
+  baselineScanId: seededExperiment.baselineScanId,
+  analysisProfileVersion: seededExperiment.analysisProfileVersion,
+  primaryConcerns: [...seededExperiment.primaryConcerns],
+  checkIns: [],
+  result: seededExperiment.result
+};
 
 export async function GET(
   request: Request,
@@ -27,6 +66,7 @@ export async function GET(
 ) {
   try {
     const { id } = await context.params;
+    if (id === seededExperiment.id) return Response.json(success(null));
     const actor = await resolveRequestActor(request);
     if (actor.kind === "guest") return Response.json(success(null));
     await createPersistentWorkspaceService(actor).getExperiment(actor.userId, id);
@@ -55,6 +95,19 @@ export async function POST(
     }
     const maxUnitPriceUsd =
       parsed.data.maxUnitPriceUsd ?? defaultAcneGuidancePreferences.maxUnitPriceUsd;
+    if (id === seededExperiment.id) {
+      const service = new PersistentRoutineRecommendationService(
+        new RequestRecommendationRepository(),
+        createRoutineRecommendationProvider()
+      );
+      const recommendation = await service.generate(
+        "seeded-demo",
+        demoExperiment,
+        products,
+        maxUnitPriceUsd
+      );
+      return Response.json(success(recommendation));
+    }
     const actor = await resolveRequestActor(request);
     if (actor.kind === "guest") {
       const provider = new MockRoutineRecommendationProvider();

@@ -900,6 +900,14 @@ export function createPersistentWorkspaceService(actor: Extract<RequestActor, { 
 export function createPersistentRoutineRecommendationService(
   actor: Extract<RequestActor, { kind: "authenticated" }>
 ) {
+  const provider = createRoutineRecommendationProvider();
+  return new PersistentRoutineRecommendationService(
+    new SupabaseRoutineRecommendationRepository(actor.client),
+    provider
+  );
+}
+
+export function createRoutineRecommendationProvider() {
   const provider = process.env.OPENAI_MOCK_MODE !== "false"
     ? new MockRoutineRecommendationProvider()
     : new OpenAiRoutineRecommendationProvider(
@@ -907,10 +915,7 @@ export function createPersistentRoutineRecommendationService(
         process.env.OPENAI_RECOMMENDATION_MODEL ?? "gpt-5.6-sol",
         process.env.OPENAI_API_BASE_URL
       );
-  return new PersistentRoutineRecommendationService(
-    new SupabaseRoutineRecommendationRepository(actor.client),
-    provider
-  );
+  return provider;
 }
 
 export function createPersistentSkinSimulationService(
