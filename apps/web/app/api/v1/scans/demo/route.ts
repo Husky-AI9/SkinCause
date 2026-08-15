@@ -13,27 +13,29 @@ function wait(milliseconds: number) {
 
 export async function POST(request: Request) {
   try {
-    const body = (await request.json()) as { clientRequestId?: string };
-    if (!body.clientRequestId) {
+    const clientRequestId = request.headers.get("x-client-request-id");
+    if (!clientRequestId) {
       return Response.json(
         failure("REQUEST_ID_REQUIRED", "Start the demo analysis again.", true),
         { status: 400 }
       );
     }
-
-    const imageResponse = await fetch(new URL("/images/demo-face-acne.png", request.url), {
-      cache: "force-cache"
-    });
-    if (!imageResponse.ok) {
+    if (request.headers.get("content-type") !== "image/png") {
       return Response.json(
-        failure("DEMO_IMAGE_UNAVAILABLE", "The sample image could not be prepared.", true),
-        { status: 503 }
+        failure("UNSUPPORTED_FORMAT", "The demo image must be a PNG.", false),
+        { status: 400 }
       );
     }
 
-    const image = new Uint8Array(await imageResponse.arrayBuffer());
+    const image = new Uint8Array(await request.arrayBuffer());
+    if (image.byteLength === 0 || image.byteLength >= 4_000_000) {
+      return Response.json(
+        failure("DEMO_IMAGE_INVALID", "The sample image could not be prepared.", true),
+        { status: 400 }
+      );
+    }
     const provider = createSkinAnalysisProvider();
-    const session = serverServices.createUploadSession(`demo-${body.clientRequestId}`, {
+    const session = serverServices.createUploadSession(`demo-${clientRequestId}`, {
       mimeType: "image/png",
       byteSize: image.byteLength
     });

@@ -1278,8 +1278,11 @@ export function ScanPage() {
         const demoScan = await readApiResponse<ScanStatusResponse>(
           await apiFetch("/api/v1/scans/demo", {
             method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ clientRequestId })
+            headers: {
+              "content-type": "image/png",
+              "x-client-request-id": clientRequestId
+            },
+            body: selectedFile
           })
         );
         if (!demoScan.result) {
