@@ -154,18 +154,26 @@ export type RequestActor =
 
 export class AuthenticationError extends Error {}
 
-function requiredServerConfig() {
+function requiredPublicServerConfig() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !publishableKey) {
+    throw new Error("SUPABASE_PUBLIC_CONFIG_MISSING");
+  }
+  return { url, publishableKey };
+}
+
+function requiredAdminServerConfig() {
+  const { url, publishableKey } = requiredPublicServerConfig();
   const secretKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !publishableKey || !secretKey) {
-    throw new Error("SUPABASE_SERVER_CONFIG_MISSING");
+  if (!secretKey) {
+    throw new Error("SUPABASE_SERVICE_ROLE_KEY_MISSING");
   }
   return { url, publishableKey, secretKey };
 }
 
 function userClient(accessToken: string) {
-  const { url, publishableKey } = requiredServerConfig();
+  const { url, publishableKey } = requiredPublicServerConfig();
   return createClient(url, publishableKey, {
     global: { headers: { Authorization: `Bearer ${accessToken}` } },
     auth: {
@@ -177,7 +185,7 @@ function userClient(accessToken: string) {
 }
 
 function adminClient() {
-  const { url, secretKey } = requiredServerConfig();
+  const { url, secretKey } = requiredAdminServerConfig();
   return createClient(url, secretKey, {
     auth: {
       autoRefreshToken: false,

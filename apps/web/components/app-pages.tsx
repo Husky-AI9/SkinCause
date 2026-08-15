@@ -1270,6 +1270,30 @@ export function ScanPage() {
     setError("");
     try {
       const clientRequestId = crypto.randomUUID();
+      if (usingDemoImage) {
+        setStatus("processing");
+        setActivity((current) => mergeActivity(current, [
+          localActivity("client", "analyzing bundled demo image")
+        ]));
+        const demoScan = await readApiResponse<ScanStatusResponse>(
+          await apiFetch("/api/v1/scans/demo", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ clientRequestId })
+          })
+        );
+        if (!demoScan.result) {
+          throw new Error(demoScan.error?.message ?? "The demo image could not be analyzed.");
+        }
+        setActivity((current) => mergeActivity(current, demoScan.activity ?? []));
+        setResult(demoScan.result);
+        setActiveConcern(initialConcernKey(demoScan.result));
+        setStatus("done");
+        window.localStorage.setItem(latestScanResultStorageKey, JSON.stringify(demoScan.result));
+        window.localStorage.setItem("skincause-latest-scan", demoScan.scanId);
+        window.localStorage.removeItem("skincause-active-scan");
+        return;
+      }
       setStatus("uploading");
       setActivity((current) => mergeActivity(current, [
         localActivity("client", "POST /api/v1/scans/upload-sessions")
