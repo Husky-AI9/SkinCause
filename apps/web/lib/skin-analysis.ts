@@ -7,7 +7,8 @@ import {
 } from "@skincause/server-core";
 
 export function createSkinAnalysisProvider(): SkinAnalysisProvider {
-  const acneAssessmentProvider = process.env.OPENAI_MOCK_MODE !== "false"
+  const useMockOpenAi = process.env.OPENAI_MOCK_MODE === "true" || !process.env.OPENAI_API_KEY;
+  const acneAssessmentProvider = useMockOpenAi
     ? new MockAcnePatternAssessmentProvider()
     : new OpenAiAcnePatternAssessmentProvider(
         process.env.OPENAI_API_KEY ?? "",

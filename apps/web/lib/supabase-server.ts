@@ -908,7 +908,8 @@ export function createPersistentRoutineRecommendationService(
 }
 
 export function createRoutineRecommendationProvider() {
-  const provider = process.env.OPENAI_MOCK_MODE !== "false"
+  const useMock = process.env.OPENAI_MOCK_MODE === "true" || !process.env.OPENAI_API_KEY;
+  const provider = useMock
     ? new MockRoutineRecommendationProvider()
     : new OpenAiRoutineRecommendationProvider(
         process.env.OPENAI_API_KEY ?? "",
