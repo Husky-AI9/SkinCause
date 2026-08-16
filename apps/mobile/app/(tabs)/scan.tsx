@@ -318,7 +318,7 @@ export default function ScanScreen() {
           </Notice>
           <View style={styles.concernList}>
             {concernRows.map((concern) => {
-              const severity = roundVisibleSeverity(concern.normalizedSeverity) ?? 0;
+              const severity = Math.round(roundVisibleSeverity(concern.normalizedSeverity) ?? 0);
               return (
                 <View key={concern.key} style={styles.concernRow}>
                   <View style={styles.concernHeading}>

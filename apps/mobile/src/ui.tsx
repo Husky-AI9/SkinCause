@@ -152,6 +152,36 @@ export const styles = StyleSheet.create({
     borderLeftColor: colors.coral,
     backgroundColor: "#fff4ef"
   },
+  budgetField: {
+    minHeight: 48,
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 12,
+    backgroundColor: colors.canvas,
+    paddingHorizontal: 14
+  },
+  budgetPrefix: { color: colors.tealDark, fontSize: 17, fontWeight: "800" },
+  budgetInput: {
+    minHeight: 46,
+    flex: 1,
+    color: colors.ink,
+    fontSize: 17,
+    fontWeight: "700",
+    paddingHorizontal: 8
+  },
+  textInput: {
+    minHeight: 48,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 12,
+    backgroundColor: colors.canvas,
+    color: colors.ink,
+    fontSize: 15,
+    paddingHorizontal: 14,
+    paddingVertical: 10
+  },
   evidenceHeroRow: {
     flexDirection: "row",
     alignItems: "center",

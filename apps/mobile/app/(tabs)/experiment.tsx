@@ -5,6 +5,7 @@ import {
   Linking,
   ScrollView,
   Text,
+  TextInput,
   View,
   type GestureResponderEvent,
   type LayoutChangeEvent
@@ -36,6 +37,18 @@ function titleCase(value: string) {
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
+function measurementLabel(key: string) {
+  const labels: Record<string, string> = {
+    ai_acne_severity: "Acne severity",
+    blemish_pattern: "Observed acne pattern",
+    redness: "Visible redness pattern",
+    texture: "Texture variation",
+    pores: "Pore visibility",
+    oiliness: "Visible oiliness"
+  };
+  return labels[key] ?? titleCase(key);
+}
+
 function ComparisonSlider({
   beforeUri,
   afterUri,
@@ -60,11 +73,15 @@ function ComparisonSlider({
 
   const imageSource = {
     uri: afterUri,
-    ...(Object.keys(imageHeaders).length > 0 ? { headers: imageHeaders } : {})
+    ...(afterUri.startsWith(`${apiOrigin}/api/`) && Object.keys(imageHeaders).length > 0
+      ? { headers: imageHeaders }
+      : {})
   };
   const beforeImageSource = {
     uri: beforeUri,
-    ...(Object.keys(imageHeaders).length > 0 ? { headers: imageHeaders } : {})
+    ...(beforeUri.startsWith(`${apiOrigin}/api/`) && Object.keys(imageHeaders).length > 0
+      ? { headers: imageHeaders }
+      : {})
   };
 
   return (
@@ -126,6 +143,7 @@ export default function ExperimentScreen() {
     getRoutineRecommendation,
     getSkinSimulation,
     imageHeaders,
+    latestScan,
     listExperiments,
     startSkinSimulation
   } = useMobile();
@@ -136,6 +154,13 @@ export default function ExperimentScreen() {
   const [recommendationBusy, setRecommendationBusy] = useState(false);
   const [simulationBusy, setSimulationBusy] = useState(false);
   const [productImageFailed, setProductImageFailed] = useState(false);
+  const [budget, setBudget] = useState("25");
+  const [plannedMode, setPlannedMode] = useState<"suspend" | "replace">("suspend");
+  const [selectedMeasurements, setSelectedMeasurements] = useState([
+    "ai_acne_severity",
+    "blemish_pattern",
+    "redness"
+  ]);
   const [error, setError] = useState("");
 
   const experimentId = experiment?.id ?? demoExperimentId;
@@ -190,7 +215,18 @@ export default function ExperimentScreen() {
     setProductImageFailed(false);
     setError("");
     try {
-      setRecommendation(await generateRoutineRecommendation(experimentId));
+      const maxUnitPriceUsd = Number(budget);
+      if (!Number.isFinite(maxUnitPriceUsd) || maxUnitPriceUsd < 1 || maxUnitPriceUsd > 500) {
+        throw new Error("Enter a product budget between $1 and $500.");
+      }
+      const generated = await generateRoutineRecommendation(experimentId, maxUnitPriceUsd);
+      setRecommendation(generated);
+      setPlannedMode(
+        generated.action === "remove" || generated.action === "keep" ? "suspend" : "replace"
+      );
+      if (generated.measurementKeys.length > 0) {
+        setSelectedMeasurements(generated.measurementKeys);
+      }
     } catch (recommendationError) {
       setError(errorMessage(recommendationError));
     } finally {
@@ -216,11 +252,11 @@ export default function ExperimentScreen() {
 
   const displayedExperiment = experiment ?? seededExperiment;
   const result = displayedExperiment.result ?? seededExperiment.result;
-  const baseline = scans[0];
+  const baseline = latestScan ?? scans[0];
   const readiness = summarizeScanReadiness(baseline);
   const acneAssessment = getVisibleAcnePatternAssessment(baseline);
   const afterUri = simulation?.imageUrl
-    ? simulation.imageUrl.startsWith("http")
+    ? simulation.imageUrl.startsWith("http") || simulation.imageUrl.startsWith("data:")
       ? simulation.imageUrl
       : `${apiOrigin}${simulation.imageUrl}`
     : null;
@@ -242,6 +278,46 @@ export default function ExperimentScreen() {
 
       {error ? <Notice danger>{error}</Notice> : null}
 
+      <Section title="Plan one clear change">
+        <Text style={styles.smallLabel}>Planned change</Text>
+        <View style={styles.actionRow}>
+          <PrimaryButton
+            label="Suspend product"
+            tone={plannedMode === "suspend" ? "teal" : "paper"}
+            style={styles.actionButton}
+            onPress={() => setPlannedMode("suspend")}
+          />
+          <PrimaryButton
+            label="Add / replace"
+            tone={plannedMode === "replace" ? "teal" : "paper"}
+            style={styles.actionButton}
+            onPress={() => setPlannedMode("replace")}
+          />
+        </View>
+        <Text style={styles.smallLabel}>Suspect product</Text>
+        <View style={styles.changeCard}>
+          <Text style={styles.cardTitle}>
+            {recommendation?.candidateProduct
+              ? `${recommendation.candidateProduct.brand} ${recommendation.candidateProduct.name}`
+              : displayedExperiment.suspectProductName}
+          </Text>
+          <Text style={styles.body}>
+            Start {new Date().toLocaleDateString()} · 14-day observation
+          </Text>
+        </View>
+        <Text style={styles.smallLabel}>Measurements to compare</Text>
+        <View style={styles.tagRow}>
+          {selectedMeasurements.map((key) => (
+            <View style={styles.tag} key={key}>
+              <Text style={styles.tagText}>{measurementLabel(key)}</Text>
+            </View>
+          ))}
+        </View>
+        <Notice>
+          The AI routine suggestion automatically applies its action and measurement choices here.
+        </Notice>
+      </Section>
+
       <Section title="Experiment evidence card">
         <View style={styles.evidenceHeroRow}>
           <Image
@@ -255,7 +331,10 @@ export default function ExperimentScreen() {
             <Text style={styles.cardTitle}>One change. One comparable baseline.</Text>
             <Text style={styles.body}>{readiness.label} · {readiness.score}/100 capture readiness</Text>
             <Text style={styles.body}>
-              Acne severity {acneAssessment.severity?.normalizedSeverity ?? "—"}/100 · {acneAssessment.visiblePattern ?? "Unclassified visible acne pattern"}
+              Acne severity {acneAssessment.severity?.normalizedSeverity === null ||
+              acneAssessment.severity?.normalizedSeverity === undefined
+                ? "—"
+                : Math.round(acneAssessment.severity.normalizedSeverity)}/100 · {acneAssessment.visiblePattern ?? "Unclassified visible acne pattern"}
             </Text>
           </View>
         </View>
@@ -293,6 +372,20 @@ export default function ExperimentScreen() {
 
       {activeStudio === "plan" ? (
         <Section title="Affordable product guidance">
+          <Text style={styles.smallLabel}>Maximum product budget</Text>
+          <View style={styles.budgetField}>
+            <Text style={styles.budgetPrefix}>$</Text>
+            <TextInput
+              accessibilityLabel="Maximum product budget in US dollars"
+              keyboardType="decimal-pad"
+              value={budget}
+              onChangeText={setBudget}
+              style={styles.budgetInput}
+              maxLength={6}
+              placeholder="25"
+              placeholderTextColor="#667777"
+            />
+          </View>
           {recommendation ? (
             <>
               <View style={styles.changeCard}>
@@ -386,7 +479,7 @@ export default function ExperimentScreen() {
               <View style={styles.tagRow}>
                 {recommendation.measurementKeys.map((key) => (
                   <View style={styles.tag} key={key}>
-                    <Text style={styles.tagText}>{key.replaceAll("_", " ")}</Text>
+                    <Text style={styles.tagText}>{measurementLabel(key)}</Text>
                   </View>
                 ))}
               </View>

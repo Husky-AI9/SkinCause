@@ -14,6 +14,7 @@ export default function RootLayout() {
         contentStyle: { backgroundColor: colors.canvas }
       }}>
         <Stack.Screen name="index" options={{ headerShown: false }} />
+        <Stack.Screen name="auth" options={{ title: "Private workspace" }} />
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       </Stack>
     </MobileProvider>

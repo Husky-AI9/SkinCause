@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { ActivityIndicator, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, ScrollView, Text, TextInput, View } from "react-native";
 import { useFocusEffect } from "expo-router";
 import type { Product } from "@skincause/contracts";
 import { products as seededProducts } from "@skincause/domain";
@@ -7,10 +7,14 @@ import { errorMessage, useMobile } from "../../src/mobile-provider";
 import { Notice, PrimaryButton, styles } from "../../src/ui";
 
 export default function ProductsScreen() {
-  const { listProducts, updateProduct } = useMobile();
+  const { createProduct, listProducts, updateProduct } = useMobile();
   const [products, setProducts] = useState<Product[]>(seededProducts);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState("");
+  const [brand, setBrand] = useState("");
+  const [category, setCategory] = useState("Acne care");
   const [error, setError] = useState("");
 
   useFocusEffect(
@@ -47,6 +51,35 @@ export default function ProductsScreen() {
     }
   }
 
+  async function addProduct() {
+    if (!name.trim()) {
+      setError("Enter a product name.");
+      return;
+    }
+    setAdding(true);
+    setError("");
+    try {
+      const created = await createProduct({
+        name: name.trim(),
+        brand: brand.trim(),
+        category: category.trim() || "Acne care",
+        startedAt: new Date().toISOString(),
+        cadence: "daily",
+        timeOfDay: "PM",
+        active: true,
+        recentlyChanged: true
+      });
+      setProducts((current) => [...current, created]);
+      setName("");
+      setBrand("");
+      setCategory("Acne care");
+    } catch (createError) {
+      setError(errorMessage(createError));
+    } finally {
+      setAdding(false);
+    }
+  }
+
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <View style={styles.hero}>
@@ -58,6 +91,44 @@ export default function ProductsScreen() {
       </View>
       {loading ? <ActivityIndicator /> : null}
       {error ? <Notice danger>{error}</Notice> : null}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Add a product</Text>
+        <Text style={styles.body}>
+          Add an affordable candidate or an existing routine step, then keep only one change active.
+        </Text>
+        <Text style={styles.smallLabel}>Product name</Text>
+        <TextInput
+          accessibilityLabel="Product name"
+          value={name}
+          onChangeText={setName}
+          placeholder="Daily facial moisturizer"
+          placeholderTextColor="#667777"
+          style={styles.textInput}
+        />
+        <Text style={styles.smallLabel}>Brand</Text>
+        <TextInput
+          accessibilityLabel="Product brand"
+          value={brand}
+          onChangeText={setBrand}
+          placeholder="Optional"
+          placeholderTextColor="#667777"
+          style={styles.textInput}
+        />
+        <Text style={styles.smallLabel}>Category</Text>
+        <TextInput
+          accessibilityLabel="Product category"
+          value={category}
+          onChangeText={setCategory}
+          placeholder="Acne care"
+          placeholderTextColor="#667777"
+          style={styles.textInput}
+        />
+        <PrimaryButton
+          label={adding ? "Adding product…" : "Add to routine"}
+          disabled={adding}
+          onPress={() => void addProduct()}
+        />
+      </View>
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Current routine</Text>
         {products.map((product) => (

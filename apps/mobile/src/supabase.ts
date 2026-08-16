@@ -23,3 +23,4 @@ export const supabase: SupabaseClient | null =
 
 export const activeScanStorageKey = "skincause-mobile-active-scan";
 export const latestScanStorageKey = "skincause-mobile-latest-scan";
+export const latestRecommendationStorageKey = "skincause-mobile-latest-recommendation";

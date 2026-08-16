@@ -62,9 +62,14 @@ export function createApiClient(options: ApiClientOptions) {
     getExperiment: (id: string, signal?: AbortSignal) => request<Experiment>(`/experiments/${id}`, { signal }),
     getRoutineRecommendation: (id: string, signal?: AbortSignal) =>
       request<RoutineRecommendation | null>(`/experiments/${id}/recommendation`, { signal }),
-    generateRoutineRecommendation: (id: string, signal?: AbortSignal) =>
+    generateRoutineRecommendation: (
+      id: string,
+      input: { maxUnitPriceUsd?: number } = {},
+      signal?: AbortSignal
+    ) =>
       request<RoutineRecommendation>(`/experiments/${id}/recommendation`, {
         method: "POST",
+        body: JSON.stringify(input),
         signal
       }),
     getSkinSimulation: (id: string, signal?: AbortSignal) =>

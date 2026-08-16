@@ -159,7 +159,12 @@ export default function DashboardScreen() {
 
       <View style={styles.statsGrid}>
         <View style={styles.metric}>
-          <Text style={styles.metricValue}>{acneAssessment.severity?.normalizedSeverity ?? "—"}</Text>
+          <Text style={styles.metricValue}>
+            {acneAssessment.severity?.normalizedSeverity === null ||
+            acneAssessment.severity?.normalizedSeverity === undefined
+              ? "—"
+              : Math.round(acneAssessment.severity.normalizedSeverity)}
+          </Text>
           <Text style={styles.metricLabel}>
             Acne severity · {classifyCosmeticConcern(acneAssessment.severity?.normalizedSeverity ?? null).label}
           </Text>
@@ -192,7 +197,7 @@ export default function DashboardScreen() {
         </Notice>
         <View style={styles.concernList}>
           {concerns.map((concern) => {
-            const severity = roundVisibleSeverity(concern.normalizedSeverity) ?? 0;
+            const severity = Math.round(roundVisibleSeverity(concern.normalizedSeverity) ?? 0);
             return (
               <View style={styles.concernRow} key={concern.key}>
                 <View style={styles.concernHeading}>

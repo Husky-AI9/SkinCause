@@ -96,16 +96,19 @@ export async function POST(
     const maxUnitPriceUsd =
       parsed.data.maxUnitPriceUsd ?? defaultAcneGuidancePreferences.maxUnitPriceUsd;
     if (id === seededExperiment.id) {
-      const service = new PersistentRoutineRecommendationService(
-        new RequestRecommendationRepository(),
-        createRoutineRecommendationProvider()
-      );
-      const recommendation = await service.generate(
-        "seeded-demo",
-        demoExperiment,
-        products,
-        maxUnitPriceUsd
-      );
+      const repository = new RequestRecommendationRepository();
+      let recommendation;
+      try {
+        recommendation = await new PersistentRoutineRecommendationService(
+          repository,
+          createRoutineRecommendationProvider()
+        ).generate("seeded-demo", demoExperiment, products, maxUnitPriceUsd);
+      } catch {
+        recommendation = await new PersistentRoutineRecommendationService(
+          repository,
+          new MockRoutineRecommendationProvider()
+        ).generate("seeded-demo", demoExperiment, products, maxUnitPriceUsd);
+      }
       return Response.json(success(recommendation));
     }
     const actor = await resolveRequestActor(request);
