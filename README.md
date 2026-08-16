@@ -29,8 +29,6 @@ SkinCause provides cosmetic tracking and organizational insights, not medical di
 7. Select **Generate simulation** and drag the before/after slider to compare the original portrait with the YouCam illustration.
 8. Use **Delete my data** from Acne plan to remove the disposable workspace.
 
-The judge-facing journey uses the same synthetic acne-visible portrait for the scan, segmentation overlays, experiment evidence, and YouCam simulation. This makes the relationship between measurement, guidance, and illustration easy to verify.
-
 ## The problem
 
 Acne-related concerns are common, emotionally difficult, and expensive to navigate. A user may change several products at once, purchase recommendations that exceed their budget, or react to a single selfie score without knowing whether lighting and capture conditions affected it. A nutrition suggestion can introduce another variable and make the result even harder to interpret.
