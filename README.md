@@ -13,6 +13,7 @@ SkinCause provides cosmetic tracking and organizational insights, not medical di
 ## Try SkinCause
 
 - **Live web application:** [https://skin-cause-web.vercel.app](https://skin-cause-web.vercel.app)
+- **Mobile Android application:** [Download APK](https://drive.google.com/file/d/1sETaegpxgo9-ZKzFQo3UMZGqXiyue069/view?usp=sharing)
 - **Source repository:** [https://github.com/Husky-AI9/SkinCause](https://github.com/Husky-AI9/SkinCause)
 - **Platforms:** responsive web and Expo/React Native Android
 - **Guest access:** select **Start acne analysis**; no account is required for the disposable demo
